@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>每日 AI 资讯卡片</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="page-header">
+        <div>
+          <p class="badge">每日更新</p>
+          <h1>AI 资讯早报</h1>
+          <p class="meta">自动更新时间：{{ updated_at }}（北京时间）</p>
+        </div>
+
+        <div class="actions">
+          <form action="{{ url_for('index') }}" method="get" class="filter-form">
+            <label for="source" class="filter-label">按来源筛选</label>
+            <select id="source" name="source" onchange="this.form.submit()">
+              <option value="all" {% if selected_source == 'all' %}selected{% endif %}>全部来源</option>
+              {% for source in sources %}
+              <option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>
+              {% endfor %}
+            </select>
+          </form>
+
+          <form action="{{ url_for('refresh_news') }}" method="post" id="refreshForm">
+            <input type="hidden" name="source" value="{{ selected_source }}" />
+            <button type="submit" class="refresh-btn" id="refreshBtn">手动刷新资讯</button>
+          </form>
+        </div>
+      </header>
+
+      {% if error_message %}
+      <section class="alert" role="alert">
+        ⚠️ {{ error_message }}
+      </section>
+      {% endif %}
+
+      {% if items %}
+      <section class="news-grid">
+        {% for item in items %}
+        <article class="card">
+          <h2>
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+          </h2>
+          <p class="info">{{ item.source }} · {{ item.published }}</p>
+          <p class="summary summary-collapsed">{{ item.summary }}</p>
+          <button type="button" class="toggle-btn">展开</button>
+          <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+        </article>
+        {% endfor %}
+      </section>
+      {% else %}
+      <section class="empty-state">
+        <p class="empty-title">今天还没有可展示的资讯</p>
+        <p class="empty-subtitle">你可以稍后再来，或点击上方“手动刷新资讯”按钮重试。</p>
+      </section>
+      {% endif %}
+    </main>
+
+    <script>
+      const refreshForm = document.getElementById("refreshForm");
+      const refreshBtn = document.getElementById("refreshBtn");
+      if (refreshForm && refreshBtn) {
+        refreshForm.addEventListener("submit", () => {
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = "刷新中...";
+        });
+      }
+
+      document.querySelectorAll(".toggle-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const summary = button.previousElementSibling;
+          const isCollapsed = summary.classList.contains("summary-collapsed");
+          summary.classList.toggle("summary-collapsed", !isCollapsed);
+          summary.classList.toggle("summary-expanded", isCollapsed);
+          button.textContent = isCollapsed ? "收起" : "展开";
+        });
+      });
+    </script>
+  </body>
+</html>
