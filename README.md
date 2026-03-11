@@ -11,7 +11,7 @@
 
 默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、NVIDIA Omniverse Blog、Stability AI Blog、DeepMind Blog。
 
-说明：NVIDIA Omniverse RSS 已切换为 developer.nvidia.com 的 feed；Adobe AI Blog 原 RSS 链接失效，已从默认源中移除。
+说明：NVIDIA Omniverse RSS 已切换为 developer.nvidia.com 的 feed；Adobe AI Blog 原 RSS 链接失效，已从默认源中移除。Search 模式已从抓取 Google HTML 改为调用 Serper API。
 
 本项目当前特别关注 AI 在游戏、视频生成、影视/短片制作、动画与数字人工作流中的应用资讯。
 
@@ -63,6 +63,8 @@ gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:5000 app:app
 OPENAI_API_KEY=你的密钥
 OPENAI_BASE_URL=https://api.gptsapi.net/v1
 OPENAI_MODEL=gpt-4o-mini
+SERPER_API_KEY=你的Serper密钥
+SERPER_MODE=news  # 可选：news(默认) / search
 
 注意：部分兼容接口需要使用 `/v1` 路径，否则可能返回 404。
 - `FLASK_RUN_HOST`：可选，默认 `0.0.0.0`。
@@ -86,7 +88,7 @@ OPENAI_MODEL=gpt-4o-mini
   - 多个 RSS 源并发抓取（非串行），进一步降低手动刷新总耗时。
   - 后端日志会输出每个源的成功/失败、耗时、抓取总数、AI 过滤后数量与失败原因。
   - 为避免单次刷新过慢，每个 RSS 源仅处理最近 18 条 entries。
-- **Google Search 近 3 天热点模式**：按 AI 主题关键词进行 Google 搜索（近 3 天）并优先限制在高质量站点，再复用现有 AI 过滤、评分、摘要、topic 分类与多样性机制。
+- **Google Search 近 3 天热点模式**：改为通过 Serper API（优先 news 模式）获取近 3 天热点，再复用现有 AI 过滤、评分、摘要、topic 分类与多样性机制。
   - 对搜索模式下正文摘要为空的结果，摘要生成会采用保守背景解读，不推断未确认的具体技术细节或事件。
 - **刷新性能优化**：
   - `MAX_ITEMS` 下调为 6（`MIN_ITEMS` 仍为 5），减少单次需要生成的新摘要数量。

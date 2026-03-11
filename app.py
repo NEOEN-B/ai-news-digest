@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from threading import RLock
 from typing import Dict, List, Optional
-from urllib.parse import quote_plus, unquote, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import feedparser
@@ -45,8 +45,6 @@ SEARCH_MODE_SITES = [
     "huggingface.co",
     "stability.ai",
     "developer.nvidia.com",
-    "adobe.com",
-    "blog.adobe.com",
 ]
 SEARCH_MODE_QUERIES = [
     "AI model",
@@ -59,6 +57,8 @@ SEARCH_MODE_QUERIES = [
     "virtual production",
 ]
 SEARCH_TIMEOUT_SECONDS = 9
+SERPER_ENDPOINT_NEWS = "https://google.serper.dev/news"
+SERPER_ENDPOINT_SEARCH = "https://google.serper.dev/search"
 
 MAX_ITEMS = 6
 MIN_ITEMS = 5
@@ -315,44 +315,77 @@ def extract_source_name_from_url(url: str) -> str:
     return host or "未知来源"
 
 
-def parse_google_search_results(html: str) -> List[Dict[str, str]]:
-    blocks = re.findall(r'<a\s+href="/url\?q=(https?://[^"&]+)[^>]*>.*?<h3[^>]*>(.*?)</h3>', html, flags=re.S)
-    results: List[Dict[str, str]] = []
-    for raw_url, raw_title in blocks:
-        url = unquote(raw_url)
-        title = re.sub(r"<.*?>", "", raw_title).strip()
-        if not title:
+def parse_serper_results(payload: Dict[str, object], mode: str) -> List[Dict[str, str]]:
+    key = "news" if mode == "news" else "organic"
+    items = payload.get(key, [])
+    if not isinstance(items, list):
+        return []
+
+    articles: List[Dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        results.append(
+        title = str(item.get("title", "")).strip()
+        url = str(item.get("link", "")).strip()
+        snippet = str(item.get("snippet", "")).strip()
+        if not title or not url:
+            continue
+        published_at = item.get("date") or item.get("datePublished") or item.get("publishedDate")
+        parsed_date = parse_entry_time({"published": str(published_at)}) if published_at else datetime.now(timezone.utc)
+        articles.append(
             {
                 "title": title,
                 "url": url,
                 "source": extract_source_name_from_url(url),
-                "published": datetime.now(timezone.utc),
-                "raw_summary": "",
+                "published": parsed_date,
+                "raw_summary": snippet,
                 "mode": "search",
             }
         )
-    return results
+    return articles
 
 
 def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
+    serper_key = os.getenv("SERPER_API_KEY", "").strip()
+    serper_mode = os.getenv("SERPER_MODE", "news").strip().lower()
+    serper_mode = "search" if serper_mode == "search" else "news"
+    endpoint = SERPER_ENDPOINT_SEARCH if serper_mode == "search" else SERPER_ENDPOINT_NEWS
+
+    if not serper_key:
+        logger.warning("Search模式未配置 SERPER_API_KEY，跳过搜索模式抓取")
+        return []
+
     articles: List[Dict[str, str]] = []
     for query in SEARCH_MODE_QUERIES:
         search_query = f"({query}) (" + " OR ".join(f"site:{site}" for site in SEARCH_MODE_SITES) + ")"
-        url = f"https://www.google.com/search?q={quote_plus(search_query)}&num=10&hl=en&tbs=qdr:d3"
+        request_body = {
+            "q": search_query,
+            "num": 10,
+            "gl": "us",
+            "hl": "en",
+            "tbs": "qdr:d3",
+        }
         start = time.monotonic()
         try:
-            req = Request(url, headers={"User-Agent": "Mozilla/5.0 ai-news-digest/1.0"})
+            req = Request(
+                endpoint,
+                data=json.dumps(request_body).encode("utf-8"),
+                headers={
+                    "X-API-KEY": serper_key,
+                    "Content-Type": "application/json",
+                    "User-Agent": "ai-news-digest/1.0",
+                },
+                method="POST",
+            )
             with urlopen(req, timeout=SEARCH_TIMEOUT_SECONDS) as response:
-                html = response.read().decode("utf-8", errors="ignore")
-            hits = parse_google_search_results(html)
+                payload = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
+            hits = parse_serper_results(payload, serper_mode)
             elapsed = time.monotonic() - start
-            logger.info("Google搜索成功 query=%s cost=%.2fs hit_count=%d", query, elapsed, len(hits))
+            logger.info("Serper搜索成功 mode=%s query=%s cost=%.2fs hit_count=%d", serper_mode, query, elapsed, len(hits))
             articles.extend(hits)
         except Exception as e:
             elapsed = time.monotonic() - start
-            logger.error("Google搜索失败 query=%s cost=%.2fs reason=%s", query, elapsed, repr(e))
+            logger.error("Serper搜索失败 mode=%s query=%s cost=%.2fs reason=%s", serper_mode, query, elapsed, repr(e))
 
     dedup_by_url: Dict[str, Dict[str, str]] = {}
     for item in articles:
@@ -360,7 +393,7 @@ def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
 
     total_hits = len(dedup_by_url)
     filtered = [item for item in dedup_by_url.values() if is_ai_related(item)]
-    logger.info("Google搜索汇总 total_hits=%d ai_related_count=%d", total_hits, len(filtered))
+    logger.info("Search模式汇总 total_hits=%d ai_related_count=%d", total_hits, len(filtered))
 
     ranked = sorted(filtered, key=score_article, reverse=True)
     return ranked[:limit]
