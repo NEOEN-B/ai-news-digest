@@ -9,9 +9,9 @@
 5. 当天摘要持久化保存到 `data/summaries.json`（重启不丢失）
 6. RSS 多源抓取带超时与故障隔离，单个源失败不影响整体
 
-默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、NVIDIA Omniverse Blog、Adobe AI Blog、Stability AI Blog。
+默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、NVIDIA Omniverse Blog、Stability AI Blog、DeepMind Blog。
 
-说明：Runway Blog 的 RSS 链接当前无效（404），已从默认源中移除。
+说明：NVIDIA Omniverse RSS 已切换为 developer.nvidia.com 的 feed；Adobe AI Blog 原 RSS 链接失效，已从默认源中移除。
 
 本项目当前特别关注 AI 在游戏、视频生成、影视/短片制作、动画与数字人工作流中的应用资讯。
 
@@ -74,6 +74,7 @@ OPENAI_MODEL=gpt-4o-mini
 ## 四、核心能力说明
 
 - **自动任务**：使用 `APScheduler` 每天北京时间 **08:00** 自动抓取并生成当天摘要。
+- **双模式采集**：支持 `RSS 稳定模式`（默认）与 `Google Search 近 3 天热点模式`，可在前端一键切换。
 - **持久化**：摘要写入 `data/summaries.json`，服务重启后仍可读取。
 - **去重策略**：
   - 先按 URL 去重；
@@ -85,13 +86,15 @@ OPENAI_MODEL=gpt-4o-mini
   - 多个 RSS 源并发抓取（非串行），进一步降低手动刷新总耗时。
   - 后端日志会输出每个源的成功/失败、耗时、抓取总数、AI 过滤后数量与失败原因。
   - 为避免单次刷新过慢，每个 RSS 源仅处理最近 18 条 entries。
+- **Google Search 近 3 天热点模式**：按 AI 主题关键词进行 Google 搜索（近 3 天）并优先限制在高质量站点，再复用现有 AI 过滤、评分、摘要、topic 分类与多样性机制。
+  - 对搜索模式下正文摘要为空的结果，摘要生成会采用保守背景解读，不推断未确认的具体技术细节或事件。
 - **刷新性能优化**：
   - `MAX_ITEMS` 下调为 6（`MIN_ITEMS` 仍为 5），减少单次需要生成的新摘要数量。
   - 若同 URL 文章已在内存缓存或 `data/summaries.json` 中存在摘要，将直接复用，避免重复调用模型。
 - **AI 相关性硬过滤（严格版）**：系统会先执行 `is_ai_related(article)`，仅保留明确 AI 相关资讯；未命中（如普通电影推荐、泛影视教程）会在排序前直接排除。
   - 英文强关键词使用正则“单词边界”匹配（避免 `ai` 误命中普通单词片段）。
   - 弱关键词（如 `ai`）不能单独成立，必须与创意/生成上下文词（如 `game/video/film/movie/animation` 或 `游戏/影视/电影/短片/动画/视频`）共同命中。
-  - 对混合来源（NVIDIA Omniverse Blog、Adobe AI Blog）执行更严格规则：必须命中至少一个强 AI 关键词，才能进入候选池。
+  - 对混合来源（NVIDIA Omniverse Blog）执行更严格规则：必须命中至少一个强 AI 关键词，才能进入候选池。
 - **排序策略**：综合关键词、时效性、来源权重评分，并加入来源多样性惩罚，减少单一来源长期霸榜。
 - **重点领域关注（加权优先）**：在“综合 AI 资讯”前提下，对以下方向追加关键词加分：
   - AI + 游戏（如 `game/gaming/unreal/unity/npc/gameplay/游戏`）
@@ -100,13 +103,13 @@ OPENAI_MODEL=gpt-4o-mini
   - AI + 动画/3D/数字人/虚拟制作（如 `avatar/digital human/virtual production/3d generation/数字人/虚拟制作/3d`）
 - **来源权重**（更高代表更优先）：
   - OpenAI / Google AI Blog（高）
-  - NVIDIA Omniverse（高），Adobe AI / Stability AI / Hugging Face（较高）
+  - NVIDIA Omniverse / DeepMind（高），Stability AI / Hugging Face（较高）
 - **手动刷新**：页面“手动刷新资讯”按钮可立即重算并覆盖当天结果。
 - **来源分布可观测性**：每次刷新都会在后端日志打印最终入选资讯的来源分布，便于排查来源单一问题。
 - **重点领域命中可观测性**：后端日志会额外打印最终入选资讯中命中重点领域关键词的数量。
 - **资讯分类字段**：每条入选资讯会包含 `topic` 字段，取值为 `游戏 / 视频生成 / 影视生成 / 通用 AI`，便于后续前端做分类筛选。
 - **分析型摘要（非简单翻译）**：摘要会强调“核心内容 + 技术背景 + 原理机制 + 行业影响”；当原文很短时可做合理背景扩展，但不编造具体事实。
-- **前端筛选**：支持按来源与 `topic`（全部 / 游戏 / 视频生成 / 影视生成 / 通用 AI）组合筛选资讯。
+- **前端筛选**：支持模式切换（RSS / Google Search 近 3 天）以及按来源与 `topic`（全部 / 游戏 / 视频生成 / 影视生成 / 通用 AI）组合筛选。
 - **时间字段兼容**：当 RSS 条目缺少 `published` 时，会回退到 `updated/pubDate/created`，再尝试 `*_parsed` 字段；仍缺失时使用当前时间，避免直接丢弃。
 
 ## 五、目录结构

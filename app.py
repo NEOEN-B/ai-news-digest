@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from threading import RLock
 from typing import Dict, List, Optional
+from urllib.parse import quote_plus, unquote, urlparse
 from urllib.request import Request, urlopen
 
 import feedparser
@@ -32,10 +33,32 @@ RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
-    {"name": "NVIDIA Omniverse Blog", "url": "https://blogs.nvidia.com/blog/category/omniverse/feed/"},
-    {"name": "Adobe AI Blog", "url": "https://blog.adobe.com/en/topics/ai/feed"},
+    {"name": "NVIDIA Omniverse Blog", "url": "https://developer.nvidia.com/blog/tag/omniverse/feed"},
     {"name": "Stability AI Blog", "url": "https://stability.ai/news/rss.xml"},
+    {"name": "DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml"},
 ]
+
+SEARCH_MODE_SITES = [
+    "openai.com",
+    "blog.google",
+    "deepmind.google",
+    "huggingface.co",
+    "stability.ai",
+    "developer.nvidia.com",
+    "adobe.com",
+    "blog.adobe.com",
+]
+SEARCH_MODE_QUERIES = [
+    "AI model",
+    "generative AI",
+    "video generation",
+    "image generation",
+    "game AI",
+    "filmmaking AI",
+    "digital human",
+    "virtual production",
+]
+SEARCH_TIMEOUT_SECONDS = 9
 
 MAX_ITEMS = 6
 MIN_ITEMS = 5
@@ -51,8 +74,8 @@ SOURCE_WEIGHTS = {
     "OpenAI": 4,
     "Google AI Blog": 4,
     "NVIDIA Omniverse": 4,
-    "Adobe AI": 3,
-    "Stability AI": 3,
+    "Stability AI": 4,
+    "DeepMind": 4,
     "Hugging Face": 3,
 }
 
@@ -108,7 +131,7 @@ AI_CONTEXT_EN_KEYWORDS = [
 ]
 AI_CONTEXT_ZH_KEYWORDS = ["游戏", "影视", "电影", "短片", "动画", "视频"]
 
-MIXED_CONTENT_SOURCES = {"NVIDIA Omniverse Blog", "Adobe AI Blog"}
+MIXED_CONTENT_SOURCES = {"NVIDIA Omniverse Blog"}
 
 AI_STRONG_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_STRONG_EN_KEYWORDS]
 AI_WEAK_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_WEAK_EN_KEYWORDS]
@@ -241,7 +264,6 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
-
         parsed_articles: List[Dict[str, str]] = []
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
             summary = (entry.get("summary") or entry.get("description") or "").strip()
@@ -288,6 +310,62 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
         return {"articles": [], "error": f"{source_name}: {error_detail}"}
 
 
+def extract_source_name_from_url(url: str) -> str:
+    host = urlparse(url).netloc.lower().replace("www.", "")
+    return host or "未知来源"
+
+
+def parse_google_search_results(html: str) -> List[Dict[str, str]]:
+    blocks = re.findall(r'<a\s+href="/url\?q=(https?://[^"&]+)[^>]*>.*?<h3[^>]*>(.*?)</h3>', html, flags=re.S)
+    results: List[Dict[str, str]] = []
+    for raw_url, raw_title in blocks:
+        url = unquote(raw_url)
+        title = re.sub(r"<.*?>", "", raw_title).strip()
+        if not title:
+            continue
+        results.append(
+            {
+                "title": title,
+                "url": url,
+                "source": extract_source_name_from_url(url),
+                "published": datetime.now(timezone.utc),
+                "raw_summary": "",
+                "mode": "search",
+            }
+        )
+    return results
+
+
+def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
+    articles: List[Dict[str, str]] = []
+    for query in SEARCH_MODE_QUERIES:
+        search_query = f"({query}) (" + " OR ".join(f"site:{site}" for site in SEARCH_MODE_SITES) + ")"
+        url = f"https://www.google.com/search?q={quote_plus(search_query)}&num=10&hl=en&tbs=qdr:d3"
+        start = time.monotonic()
+        try:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 ai-news-digest/1.0"})
+            with urlopen(req, timeout=SEARCH_TIMEOUT_SECONDS) as response:
+                html = response.read().decode("utf-8", errors="ignore")
+            hits = parse_google_search_results(html)
+            elapsed = time.monotonic() - start
+            logger.info("Google搜索成功 query=%s cost=%.2fs hit_count=%d", query, elapsed, len(hits))
+            articles.extend(hits)
+        except Exception as e:
+            elapsed = time.monotonic() - start
+            logger.error("Google搜索失败 query=%s cost=%.2fs reason=%s", query, elapsed, repr(e))
+
+    dedup_by_url: Dict[str, Dict[str, str]] = {}
+    for item in articles:
+        dedup_by_url[item["url"]] = item
+
+    total_hits = len(dedup_by_url)
+    filtered = [item for item in dedup_by_url.values() if is_ai_related(item)]
+    logger.info("Google搜索汇总 total_hits=%d ai_related_count=%d", total_hits, len(filtered))
+
+    ranked = sorted(filtered, key=score_article, reverse=True)
+    return ranked[:limit]
+
+
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
@@ -332,6 +410,11 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         if len(raw_summary) < 180
         else ""
     )
+    search_guard_notice = (
+        "当前为搜索模式且缺少正文摘要：仅可做保守背景解读，不要推断具体技术细节、发布事件或量化结果。"
+        if article.get("mode") == "search" and not raw_summary.strip()
+        else ""
+    )
     prompt = f"""你是AI产业分析师。请基于以下新闻生成一段简体中文“分析型摘要”（<=300字）。
 要求：
 1) 先说清新闻核心内容；
@@ -340,7 +423,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
 4) 点出对行业、创作流程或产品竞争的潜在影响；
 5) 信息密度高，减少机械翻译感；
 6) 允许做合理背景扩展，但严禁编造新闻中未确认的具体事实（数字、发布时间、合作方、已落地结果等）。
-{short_notice}
+{short_notice} {search_guard_notice}
 
 标题: {article['title']}
 来源: {article['source']}
@@ -435,8 +518,8 @@ def select_diverse_articles(ranked: List[Dict[str, str]], target_count: int) -> 
     return selected
 
 
-def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
-    day_key = datetime.now(CN_TZ).strftime("%Y-%m-%d")
+def build_daily_digest(force_refresh: bool = False, mode: str = "rss") -> List[Dict[str, str]]:
+    day_key = f"{datetime.now(CN_TZ).strftime('%Y-%m-%d')}:{mode}"
     if not force_refresh and day_key in CACHE:
         return CACHE[day_key]
 
@@ -444,7 +527,10 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL")
 
-        candidates = fetch_latest_ai_articles(limit=50)
+        if mode == "search":
+            candidates = search_recent_ai_news(limit=80)
+        else:
+            candidates = fetch_latest_ai_articles(limit=50)
         ranked = sorted(candidates, key=score_article, reverse=True)
 
         target_count = min(MAX_ITEMS, max(MIN_ITEMS, len(ranked)))
@@ -511,14 +597,15 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
 
 
 def scheduled_daily_refresh() -> None:
-    build_daily_digest(force_refresh=True)
+    build_daily_digest(force_refresh=True, mode="rss")
 
 
 @app.route("/")
 def index():
     selected_source = request.args.get("source", "all")
     selected_topic = request.args.get("topic", "all")
-    all_items = build_daily_digest()
+    selected_mode = request.args.get("mode", "rss")
+    all_items = build_daily_digest(mode=selected_mode)
     available_sources = sorted({item.get("source", "未知来源") for item in all_items})
     available_topics = ["游戏", "视频生成", "影视生成", "通用 AI"]
 
@@ -537,6 +624,7 @@ def index():
         topics=available_topics,
         selected_source=selected_source,
         selected_topic=selected_topic,
+        selected_mode=selected_mode,
     )
 
 
@@ -544,8 +632,9 @@ def index():
 def refresh_news():
     selected_source = request.form.get("source", "all")
     selected_topic = request.form.get("topic", "all")
-    build_daily_digest(force_refresh=True)
-    return redirect(url_for("index", source=selected_source, topic=selected_topic))
+    selected_mode = request.form.get("mode", "rss")
+    build_daily_digest(force_refresh=True, mode=selected_mode)
+    return redirect(url_for("index", source=selected_source, topic=selected_topic, mode=selected_mode))
 
 
 def start_scheduler() -> BackgroundScheduler:
