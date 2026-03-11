@@ -32,8 +32,9 @@ RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
-    {"name": "Unity Blog", "url": "https://blog.unity.com/feed"},
-    {"name": "No Film School", "url": "https://nofilmschool.com/rss.xml"},
+    {"name": "NVIDIA Omniverse Blog", "url": "https://blogs.nvidia.com/blog/category/omniverse/feed/"},
+    {"name": "Adobe AI Blog", "url": "https://blog.adobe.com/en/topics/ai/feed"},
+    {"name": "Stability AI Blog", "url": "https://stability.ai/news/rss.xml"},
 ]
 
 MAX_ITEMS = 6
@@ -49,9 +50,10 @@ LAST_ERROR = ""
 SOURCE_WEIGHTS = {
     "OpenAI": 4,
     "Google AI Blog": 4,
-    "Unity": 3,
-    "No Film School": 3,
-    "Hugging Face": 2,
+    "NVIDIA Omniverse": 4,
+    "Adobe AI": 3,
+    "Stability AI": 3,
+    "Hugging Face": 3,
 }
 
 FOCUS_DOMAIN_KEYWORDS = {
@@ -106,7 +108,7 @@ AI_CONTEXT_EN_KEYWORDS = [
 ]
 AI_CONTEXT_ZH_KEYWORDS = ["游戏", "影视", "电影", "短片", "动画", "视频"]
 
-MIXED_CONTENT_SOURCES = {"No Film School", "Unity Blog"}
+MIXED_CONTENT_SOURCES = {"NVIDIA Omniverse Blog", "Adobe AI Blog"}
 
 AI_STRONG_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_STRONG_EN_KEYWORDS]
 AI_WEAK_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_WEAK_EN_KEYWORDS]
@@ -253,7 +255,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 }
             )
 
-        # AI相关性硬过滤：所有来源都先过滤；混合来源必须命中强AI关键词
+        # AI相关性硬过滤：所有来源执行过滤；混合来源必须命中强AI关键词
         if source_name in MIXED_CONTENT_SOURCES:
             logger.info("混合来源启用更严格AI过滤 source=%s", source_name)
             source_articles = [
@@ -285,7 +287,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
         )
         return {"articles": [], "error": f"{source_name}: {error_detail}"}
 
-      
+
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
