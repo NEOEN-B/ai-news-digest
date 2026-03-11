@@ -61,7 +61,7 @@ FOCUS_DOMAIN_KEYWORDS = {
     "ai_film": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
     "ai_virtual": ["avatar", "digital human", "virtual production", "3d generation", "数字人", "虚拟制作", "3d"],
 }
-FOCUS_DOMAIN_BONUS = 3
+FOCUS_DOMAIN_BONUS = 4
 
 TOPIC_KEYWORDS = {
     "游戏": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
@@ -402,7 +402,7 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
                 summary_by_url[item["url"]] = summary
                 generated_count += 1
 
-            topic = topic_by_url.get(item["url"]) or classify_article_topic(item)
+            topic = classify_article_topic(item)
             topic_by_url[item["url"]] = topic
 
             result.append(
