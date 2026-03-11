@@ -169,21 +169,6 @@ def build_summary_cache_by_url() -> Dict[str, str]:
     return summary_by_url
 
 
-def build_topic_cache_by_url() -> Dict[str, str]:
-    topic_by_url: Dict[str, str] = {}
-    for items in CACHE.values():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            url = item.get("url")
-            topic = item.get("topic")
-            if isinstance(url, str) and url and isinstance(topic, str) and topic:
-                topic_by_url[url] = topic
-    return topic_by_url
-
-
 def parse_entry_time(entry) -> datetime:
     candidate = (
         entry.get("published")
@@ -234,6 +219,14 @@ def is_ai_related(article: Dict[str, str]) -> bool:
     return context_en_hit or context_zh_hit
 
 
+def has_strong_ai_signal(article: Dict[str, str]) -> bool:
+    text = f"{article.get('title', '')} {article.get('raw_summary', '')}"
+    text_lower = text.lower()
+    return any(pattern.search(text) for pattern in AI_STRONG_EN_PATTERNS) or any(
+        keyword in text_lower for keyword in AI_STRONG_ZH_KEYWORDS
+    )
+
+
 def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
     source_name = source["name"]
     source_url = source["url"]
@@ -260,10 +253,15 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 }
             )
 
-        # 所有来源都先进行 AI 相关性过滤；混合内容来源额外记录日志
+        # AI相关性硬过滤：所有来源都先过滤；混合来源必须命中强AI关键词
         if source_name in MIXED_CONTENT_SOURCES:
-            logger.info("混合来源启用AI硬过滤 source=%s", source_name)
-        source_articles = [article for article in parsed_articles if is_ai_related(article)]
+            logger.info("混合来源启用更严格AI过滤 source=%s", source_name)
+            source_articles = [
+                article for article in parsed_articles
+                if is_ai_related(article) and has_strong_ai_signal(article)
+            ]
+        else:
+            source_articles = [article for article in parsed_articles if is_ai_related(article)]
 
         elapsed = time.monotonic() - start
         logger.info(
@@ -287,7 +285,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
         )
         return {"articles": [], "error": f"{source_name}: {error_detail}"}
 
-
+      
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
@@ -326,14 +324,25 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
     if client is None:
         return fallback
 
-    prompt = (
-        "Summarize the following AI news article in Simplified Chinese. "
-        "Focus on the technical highlights or practical insights. "
-        "Requirements: keep it under 300 Chinese characters, concise and readable.\n\n"
-        f"Title: {article['title']}\n"
-        f"Source: {article['source']}\n"
-        f"Content: {article['raw_summary'][:2000]}"
+    raw_summary = article.get("raw_summary", "")
+    short_notice = (
+        "原文摘要较短，请基于标题与关键词做适度背景补充，但不要编造具体事实。"
+        if len(raw_summary) < 180
+        else ""
     )
+    prompt = f"""你是AI产业分析师。请基于以下新闻生成一段简体中文“分析型摘要”（<=300字）。
+要求：
+1) 先说清新闻核心内容；
+2) 补充相关技术背景；
+3) 简要解释关键原理/机制；
+4) 点出对行业、创作流程或产品竞争的潜在影响；
+5) 信息密度高，减少机械翻译感；
+6) 允许做合理背景扩展，但严禁编造新闻中未确认的具体事实（数字、发布时间、合作方、已落地结果等）。
+{short_notice}
+
+标题: {article['title']}
+来源: {article['source']}
+正文摘要: {raw_summary[:2000]}"""
 
     try:
         resp = client.chat.completions.create(
@@ -341,7 +350,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=380,
         )
         text = (resp.choices[0].message.content or "").strip()
@@ -448,7 +457,6 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
         logger.info("最终入选重点领域命中数量：%d/%d", selected_focus_hits, len(selected))
 
         summary_by_url = build_summary_cache_by_url()
-        topic_by_url = build_topic_cache_by_url()
         reused_count = 0
         generated_count = 0
         client: Optional[OpenAI] = None
@@ -470,7 +478,6 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
                 generated_count += 1
 
             topic = classify_article_topic(item)
-            topic_by_url[item["url"]] = topic
 
             result.append(
                 {
