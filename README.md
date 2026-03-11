@@ -17,7 +17,7 @@
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 # 可选：编辑 .env，填入 OPENAI_API_KEY
