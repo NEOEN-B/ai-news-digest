@@ -17,6 +17,12 @@
 
         <div class="actions">
           <form action="{{ url_for('index') }}" method="get" class="filter-form">
+            <label for="mode" class="filter-label">模式切换</label>
+            <select id="mode" name="mode" onchange="this.form.submit()">
+              <option value="rss" {% if selected_mode == 'rss' %}selected{% endif %}>RSS 稳定模式</option>
+              <option value="search" {% if selected_mode == 'search' %}selected{% endif %}>Google Search 近 3 天热点模式</option>
+            </select>
+
             <label for="source" class="filter-label">按来源筛选</label>
             <select id="source" name="source" onchange="this.form.submit()">
               <option value="all" {% if selected_source == 'all' %}selected{% endif %}>全部来源</option>
@@ -24,10 +30,20 @@
               <option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>
               {% endfor %}
             </select>
+
+            <label for="topic" class="filter-label">按主题筛选</label>
+            <select id="topic" name="topic" onchange="this.form.submit()">
+              <option value="all" {% if selected_topic == 'all' %}selected{% endif %}>全部主题</option>
+              {% for topic in topics %}
+              <option value="{{ topic }}" {% if selected_topic == topic %}selected{% endif %}>{{ topic }}</option>
+              {% endfor %}
+            </select>
           </form>
 
           <form action="{{ url_for('refresh_news') }}" method="post" id="refreshForm">
             <input type="hidden" name="source" value="{{ selected_source }}" />
+            <input type="hidden" name="topic" value="{{ selected_topic }}" />
+            <input type="hidden" name="mode" value="{{ selected_mode }}" />
             <button type="submit" class="refresh-btn" id="refreshBtn">手动刷新资讯</button>
           </form>
         </div>
@@ -46,7 +62,7 @@
           <h2>
             <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
           </h2>
-          <p class="info">{{ item.source }} · {{ item.published }}</p>
+          <p class="info">{{ item.source }} · {{ item.topic or "通用 AI" }} · {{ item.published }}</p>
           <p class="summary summary-collapsed">{{ item.summary }}</p>
           <button type="button" class="toggle-btn">展开</button>
           <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
