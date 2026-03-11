@@ -31,9 +31,9 @@ RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
-    {"name": "Microsoft AI Blog", "url": "https://blogs.microsoft.com/ai/feed/"},
-    {"name": "NVIDIA AI Blog", "url": "https://blogs.nvidia.com/blog/category/ai/feed/"},
-    {"name": "AWS ML Blog", "url": "https://aws.amazon.com/blogs/machine-learning/feed/"},
+    {"name": "Runway Blog", "url": "https://runwayml.com/blog/rss.xml"},
+    {"name": "Unity Blog", "url": "https://blog.unity.com/feed"},
+    {"name": "No Film School", "url": "https://nofilmschool.com/rss.xml"},
 ]
 
 MAX_ITEMS = 6
@@ -49,9 +49,9 @@ LAST_ERROR = ""
 SOURCE_WEIGHTS = {
     "OpenAI": 4,
     "Google AI Blog": 4,
-    "Microsoft AI": 3,
-    "NVIDIA": 3,
-    "AWS Machine Learning": 3,
+    "Runway": 4,
+    "Unity": 3,
+    "No Film School": 3,
     "Hugging Face": 2,
 }
 
@@ -186,6 +186,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
+        source_title = feed.feed.get("title") or source_name
 
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
             summary = (entry.get("summary") or entry.get("description") or "").strip()
@@ -441,13 +442,16 @@ def scheduled_daily_refresh() -> None:
 @app.route("/")
 def index():
     selected_source = request.args.get("source", "all")
+    selected_topic = request.args.get("topic", "all")
     all_items = build_daily_digest()
     available_sources = sorted({item.get("source", "未知来源") for item in all_items})
+    available_topics = ["游戏", "视频生成", "影视生成", "通用 AI"]
 
+    items = all_items
     if selected_source != "all":
-        items = [item for item in all_items if item.get("source") == selected_source]
-    else:
-        items = all_items
+        items = [item for item in items if item.get("source") == selected_source]
+    if selected_topic != "all":
+        items = [item for item in items if item.get("topic", "通用 AI") == selected_topic]
 
     return render_template(
         "index.html",
@@ -455,15 +459,18 @@ def index():
         updated_at=datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M"),
         error_message=get_last_error(),
         sources=available_sources,
+        topics=available_topics,
         selected_source=selected_source,
+        selected_topic=selected_topic,
     )
 
 
 @app.route("/refresh", methods=["POST"])
 def refresh_news():
     selected_source = request.form.get("source", "all")
+    selected_topic = request.form.get("topic", "all")
     build_daily_digest(force_refresh=True)
-    return redirect(url_for("index", source=selected_source))
+    return redirect(url_for("index", source=selected_source, topic=selected_topic))
 
 
 def start_scheduler() -> BackgroundScheduler:

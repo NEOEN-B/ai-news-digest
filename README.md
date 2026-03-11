@@ -9,7 +9,9 @@
 5. 当天摘要持久化保存到 `data/summaries.json`（重启不丢失）
 6. RSS 多源抓取带超时与故障隔离，单个源失败不影响整体
 
-默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、Microsoft AI Blog、NVIDIA AI Blog、AWS ML Blog。
+默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、Runway Blog、Unity Blog、No Film School。
+
+本项目当前特别关注 AI 在游戏、视频生成、影视/短片制作、动画与数字人工作流中的应用资讯。
 
 ## 一、本地运行
 
@@ -91,11 +93,12 @@ OPENAI_MODEL=gpt-4o-mini
   - AI + 动画/3D/数字人/虚拟制作（如 `avatar/digital human/virtual production/3d generation/数字人/虚拟制作/3d`）
 - **来源权重**（更高代表更优先）：
   - OpenAI / Google AI Blog（高）
-  - Microsoft AI / NVIDIA / AWS ML（较高）
+  - Runway（高），Unity / No Film School（较高）
 - **手动刷新**：页面“手动刷新资讯”按钮可立即重算并覆盖当天结果。
 - **来源分布可观测性**：每次刷新都会在后端日志打印最终入选资讯的来源分布，便于排查来源单一问题。
 - **重点领域命中可观测性**：后端日志会额外打印最终入选资讯中命中重点领域关键词的数量。
 - **资讯分类字段**：每条入选资讯会包含 `topic` 字段，取值为 `游戏 / 视频生成 / 影视生成 / 通用 AI`，便于后续前端做分类筛选。
+- **前端筛选**：支持按来源与 `topic`（全部 / 游戏 / 视频生成 / 影视生成 / 通用 AI）组合筛选资讯。
 - **时间字段兼容**：当 RSS 条目缺少 `published` 时，会回退到 `updated/pubDate/created`，再尝试 `*_parsed` 字段；仍缺失时使用当前时间，避免直接丢弃。
 
 ## 五、目录结构
