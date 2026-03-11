@@ -9,7 +9,9 @@
 5. 当天摘要持久化保存到 `data/summaries.json`（重启不丢失）
 6. RSS 多源抓取带超时与故障隔离，单个源失败不影响整体
 
-默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、Runway Blog、Unity Blog、No Film School。
+默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、Unity Blog、No Film School。
+
+说明：Runway Blog 的 RSS 链接当前无效（404），已从默认源中移除。
 
 本项目当前特别关注 AI 在游戏、视频生成、影视/短片制作、动画与数字人工作流中的应用资讯。
 
@@ -80,11 +82,12 @@ OPENAI_MODEL=gpt-4o-mini
   - 不直接 `feedparser.parse(url)`，而是先进行带超时（默认 9 秒）的 HTTP 请求，再交给 `feedparser.parse(content)`。
   - 每个 RSS 源独立 `try/except`，失败源会记录日志但不会中断其他源抓取。
   - 多个 RSS 源并发抓取（非串行），进一步降低手动刷新总耗时。
-  - 后端日志会输出每个源的成功/失败、耗时、抓取条数与失败原因。
+  - 后端日志会输出每个源的成功/失败、耗时、抓取总数、AI 过滤后数量与失败原因。
   - 为避免单次刷新过慢，每个 RSS 源仅处理最近 18 条 entries。
 - **刷新性能优化**：
   - `MAX_ITEMS` 下调为 6（`MIN_ITEMS` 仍为 5），减少单次需要生成的新摘要数量。
   - 若同 URL 文章已在内存缓存或 `data/summaries.json` 中存在摘要，将直接复用，避免重复调用模型。
+- **AI 相关性硬过滤**：系统会先执行 `is_ai_related(article)`，仅保留标题或摘要明确命中 AI 相关关键词的资讯；未命中（如普通电影推荐、泛影视教程）会在排序前直接排除。
 - **排序策略**：综合关键词、时效性、来源权重评分，并加入来源多样性惩罚，减少单一来源长期霸榜。
 - **重点领域关注（加权优先）**：在“综合 AI 资讯”前提下，对以下方向追加关键词加分：
   - AI + 游戏（如 `game/gaming/unreal/unity/npc/gameplay/游戏`）
@@ -93,7 +96,7 @@ OPENAI_MODEL=gpt-4o-mini
   - AI + 动画/3D/数字人/虚拟制作（如 `avatar/digital human/virtual production/3d generation/数字人/虚拟制作/3d`）
 - **来源权重**（更高代表更优先）：
   - OpenAI / Google AI Blog（高）
-  - Runway（高），Unity / No Film School（较高）
+  - Unity / No Film School（较高）
 - **手动刷新**：页面“手动刷新资讯”按钮可立即重算并覆盖当天结果。
 - **来源分布可观测性**：每次刷新都会在后端日志打印最终入选资讯的来源分布，便于排查来源单一问题。
 - **重点领域命中可观测性**：后端日志会额外打印最终入选资讯中命中重点领域关键词的数量。

@@ -31,7 +31,6 @@ RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
-    {"name": "Runway Blog", "url": "https://runwayml.com/blog/rss.xml"},
     {"name": "Unity Blog", "url": "https://blog.unity.com/feed"},
     {"name": "No Film School", "url": "https://nofilmschool.com/rss.xml"},
 ]
@@ -49,7 +48,6 @@ LAST_ERROR = ""
 SOURCE_WEIGHTS = {
     "OpenAI": 4,
     "Google AI Blog": 4,
-    "Runway": 4,
     "Unity": 3,
     "No Film School": 3,
     "Hugging Face": 2,
@@ -69,6 +67,17 @@ TOPIC_KEYWORDS = {
     "影视生成": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
 }
 DEFAULT_TOPIC = "通用 AI"
+
+AI_RELATED_KEYWORDS = [
+    "ai", "artificial intelligence", "generative ai", "genai",
+    "model", "llm", "agent", "neural", "machine learning",
+    "text-to-video", "video generation", "video model", "image generation",
+    "sora", "veo", "runway", "stable diffusion", "diffusion",
+    "npc ai", "ai game", "ai filmmaking", "ai animation",
+    "人工智能", "生成式ai", "生成式人工智能", "大模型", "智能体",
+    "视频生成", "图像生成", "文生视频", "数字人", "虚拟制作",
+]
+MIXED_CONTENT_SOURCES = {"No Film School", "Unity Blog"}
 
 CACHE: Dict[str, List[Dict[str, str]]] = {}
 
@@ -174,6 +183,11 @@ def is_similar_title(title: str, seen_titles: List[str], threshold: float = 0.82
     return any(SequenceMatcher(None, current, existing).ratio() >= threshold for existing in seen_titles)
 
 
+def is_ai_related(article: Dict[str, str]) -> bool:
+    text = f"{article.get('title', '')} {article.get('raw_summary', '')}".lower()
+    return any(keyword in text for keyword in AI_RELATED_KEYWORDS)
+
+
 def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
     source_name = source["name"]
     source_url = source["url"]
@@ -186,11 +200,11 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
-        source_title = feed.feed.get("title") or source_name
 
+        parsed_articles: List[Dict[str, str]] = []
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
             summary = (entry.get("summary") or entry.get("description") or "").strip()
-            source_articles.append(
+            parsed_articles.append(
                 {
                     "title": entry.get("title", "无标题"),
                     "url": entry.get("link", "#"),
@@ -200,12 +214,18 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 }
             )
 
+        # 所有来源都先进行 AI 相关性过滤；混合内容来源额外记录日志
+        if source_name in MIXED_CONTENT_SOURCES:
+            logger.info("混合来源启用AI硬过滤 source=%s", source_name)
+        source_articles = [article for article in parsed_articles if is_ai_related(article)]
+
         elapsed = time.monotonic() - start
         logger.info(
-            "RSS抓取成功 source=%s url=%s cost=%.2fs count=%d",
+            "RSS抓取成功 source=%s url=%s cost=%.2fs total_count=%d ai_related_count=%d",
             source_name,
             source_url,
             elapsed,
+            len(parsed_articles),
             len(source_articles),
         )
         return {"articles": source_articles, "error": ""}
