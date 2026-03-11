@@ -89,6 +89,8 @@ SERPER_MODE=news  # 可选：news(默认) / search
   - 后端日志会输出每个源的成功/失败、耗时、抓取总数、AI 过滤后数量与失败原因。
   - 为避免单次刷新过慢，每个 RSS 源仅处理最近 18 条 entries。
 - **Google Search 近 3 天热点模式**：改为通过 Serper API（优先 news 模式）获取近 3 天热点，再复用现有 AI 过滤、评分、摘要、topic 分类与多样性机制。
+  - 启用域名白名单（如 openai.com、blog.google、deepmind.google、huggingface.co、stability.ai、developer.nvidia.com）与黑名单（如 forums.developer.nvidia.com、论坛/社区路径）以提升结果质量。
+  - 搜索结果会映射来源显示名（如 `deepmind.google -> DeepMind Blog`、`huggingface.co -> Hugging Face`、`developer.nvidia.com -> NVIDIA Developer Blog`）。
   - 对搜索模式下正文摘要为空的结果，摘要生成会采用保守背景解读，不推断未确认的具体技术细节或事件。
 - **刷新性能优化**：
   - `MAX_ITEMS` 下调为 6（`MIN_ITEMS` 仍为 5），减少单次需要生成的新摘要数量。
@@ -112,6 +114,7 @@ SERPER_MODE=news  # 可选：news(默认) / search
 - **资讯分类字段**：每条入选资讯会包含 `topic` 字段，取值为 `游戏 / 视频生成 / 影视生成 / 通用 AI`，便于后续前端做分类筛选。
 - **分析型摘要（非简单翻译）**：摘要会强调“核心内容 + 技术背景 + 原理机制 + 行业影响”；当原文很短时可做合理背景扩展，但不编造具体事实。
 - **前端筛选**：支持模式切换（RSS / Google Search 近 3 天）以及按来源与 `topic`（全部 / 游戏 / 视频生成 / 影视生成 / 通用 AI）组合筛选。
+  - 当 Search 模式结果过少时，页面会提示建议切换到 RSS 稳定模式。
 - **时间字段兼容**：当 RSS 条目缺少 `published` 时，会回退到 `updated/pubDate/created`，再尝试 `*_parsed` 字段；仍缺失时使用当前时间，避免直接丢弃。
 
 ## 五、目录结构

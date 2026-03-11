@@ -46,6 +46,29 @@ SEARCH_MODE_SITES = [
     "stability.ai",
     "developer.nvidia.com",
 ]
+SEARCH_ALLOWED_HOSTS = {
+    "openai.com",
+    "blog.google",
+    "deepmind.google",
+    "huggingface.co",
+    "stability.ai",
+    "developer.nvidia.com",
+}
+SEARCH_BLOCKED_HOSTS = {
+    "forums.developer.nvidia.com",
+    "reddit.com",
+    "www.reddit.com",
+    "news.ycombinator.com",
+}
+SEARCH_BLOCKED_PATH_KEYWORDS = ["/forum", "/forums", "/community", "/discuss", "/discussion"]
+SEARCH_SOURCE_NAME_MAP = {
+    "openai.com": "OpenAI News",
+    "blog.google": "Google AI Blog",
+    "deepmind.google": "DeepMind Blog",
+    "huggingface.co": "Hugging Face",
+    "stability.ai": "Stability AI Blog",
+    "developer.nvidia.com": "NVIDIA Developer Blog",
+}
 SEARCH_MODE_QUERIES = [
     "AI model",
     "generative AI",
@@ -312,7 +335,19 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
 
 def extract_source_name_from_url(url: str) -> str:
     host = urlparse(url).netloc.lower().replace("www.", "")
-    return host or "未知来源"
+    return SEARCH_SOURCE_NAME_MAP.get(host, host or "未知来源")
+
+
+def is_allowed_search_result(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().replace("www.", "")
+    path = parsed.path.lower()
+
+    if host in SEARCH_BLOCKED_HOSTS:
+        return False
+    if any(keyword in path for keyword in SEARCH_BLOCKED_PATH_KEYWORDS):
+        return False
+    return host in SEARCH_ALLOWED_HOSTS
 
 
 def parse_serper_results(payload: Dict[str, object], mode: str) -> List[Dict[str, str]]:
@@ -329,6 +364,8 @@ def parse_serper_results(payload: Dict[str, object], mode: str) -> List[Dict[str
         url = str(item.get("link", "")).strip()
         snippet = str(item.get("snippet", "")).strip()
         if not title or not url:
+            continue
+        if not is_allowed_search_result(url):
             continue
         published_at = item.get("date") or item.get("datePublished") or item.get("publishedDate")
         parsed_date = parse_entry_time({"published": str(published_at)}) if published_at else datetime.now(timezone.utc)
@@ -648,6 +685,10 @@ def index():
     if selected_topic != "all":
         items = [item for item in items if item.get("topic", "通用 AI") == selected_topic]
 
+    mode_hint = ""
+    if selected_mode == "search" and len(items) < MIN_ITEMS:
+        mode_hint = "Search 模式近 3 天可用高质量结果较少，建议切换到 RSS 稳定模式查看更多资讯。"
+
     return render_template(
         "index.html",
         items=items,
@@ -658,6 +699,7 @@ def index():
         selected_source=selected_source,
         selected_topic=selected_topic,
         selected_mode=selected_mode,
+        mode_hint=mode_hint,
     )
 
 
