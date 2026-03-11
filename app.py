@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
@@ -28,13 +29,14 @@ logger = logging.getLogger(__name__)
 
 RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
-    {"name": "Anthropic News", "url": "https://www.anthropic.com/news/rss.xml"},
+    {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
 ]
 
-MAX_ITEMS = 10
+MAX_ITEMS = 6
 MIN_ITEMS = 5
 RSS_TIMEOUT_SECONDS = 9
+MAX_ENTRIES_PER_SOURCE = 18
 DIVERSITY_PENALTY = 3
 CN_TZ = timezone(timedelta(hours=8))
 DATA_PATH = Path("data/summaries.json")
@@ -91,6 +93,21 @@ def persist_cache() -> None:
         set_last_error("摘要保存失败，请检查 data 目录写入权限。")
 
 
+def build_summary_cache_by_url() -> Dict[str, str]:
+    summary_by_url: Dict[str, str] = {}
+    for items in CACHE.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            summary = item.get("summary")
+            if isinstance(url, str) and url and isinstance(summary, str) and summary:
+                summary_by_url[url] = summary
+    return summary_by_url
+
+
 def parse_entry_time(entry) -> datetime:
     candidate = (
         entry.get("published")
@@ -123,57 +140,65 @@ def is_similar_title(title: str, seen_titles: List[str], threshold: float = 0.82
     return any(SequenceMatcher(None, current, existing).ratio() >= threshold for existing in seen_titles)
 
 
+def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
+    source_name = source["name"]
+    source_url = source["url"]
+    start = time.monotonic()
+    source_articles: List[Dict[str, str]] = []
+
+    try:
+        req = Request(source_url, headers={"User-Agent": "ai-news-digest/1.0"})
+        with urlopen(req, timeout=RSS_TIMEOUT_SECONDS) as response:
+            content = response.read()
+
+        feed = feedparser.parse(content)
+        source_title = feed.feed.get("title") or source_name
+
+        for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
+            summary = (entry.get("summary") or entry.get("description") or "").strip()
+            source_articles.append(
+                {
+                    "title": entry.get("title", "无标题"),
+                    "url": entry.get("link", "#"),
+                    "source": source_title,
+                    "published": parse_entry_time(entry),
+                    "raw_summary": summary,
+                }
+            )
+
+        elapsed = time.monotonic() - start
+        logger.info(
+            "RSS抓取成功 source=%s url=%s cost=%.2fs count=%d",
+            source_name,
+            source_url,
+            elapsed,
+            len(source_articles),
+        )
+        return {"articles": source_articles, "error": ""}
+    except Exception as e:
+        elapsed = time.monotonic() - start
+        error_detail = repr(e)
+        logger.error(
+            "RSS抓取失败 source=%s url=%s cost=%.2fs reason=%s",
+            source_name,
+            source_url,
+            elapsed,
+            error_detail,
+        )
+        return {"articles": [], "error": f"{source_name}: {error_detail}"}
+
+
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
 
-    for source in RSS_SOURCES:
-        source_name = source["name"]
-        source_url = source["url"]
-        start = time.monotonic()
-
-        try:
-            req = Request(source_url, headers={"User-Agent": "ai-news-digest/1.0"})
-            with urlopen(req, timeout=RSS_TIMEOUT_SECONDS) as response:
-                content = response.read()
-
-            feed = feedparser.parse(content)
-            source_title = feed.feed.get("title") or source_name
-
-            source_count = 0
-            for entry in feed.entries:
-                summary = (entry.get("summary") or entry.get("description") or "").strip()
-                articles.append(
-                    {
-                        "title": entry.get("title", "无标题"),
-                        "url": entry.get("link", "#"),
-                        "source": source_title,
-                        "published": parse_entry_time(entry),
-                        "raw_summary": summary,
-                    }
-                )
-                source_count += 1
-
-            elapsed = time.monotonic() - start
-            logger.info(
-                "RSS抓取成功 source=%s url=%s cost=%.2fs count=%d",
-                source_name,
-                source_url,
-                elapsed,
-                source_count,
-            )
-        except Exception as e:
-            elapsed = time.monotonic() - start
-            error_detail = repr(e)
-            logger.error(
-                "RSS抓取失败 source=%s url=%s cost=%.2fs reason=%s",
-                source_name,
-                source_url,
-                elapsed,
-                error_detail,
-            )
-            failed_sources.append(f"{source_name}: {error_detail}")
-            continue
+    with ThreadPoolExecutor(max_workers=len(RSS_SOURCES)) as executor:
+        futures = [executor.submit(fetch_source_articles, source) for source in RSS_SOURCES]
+        for future in as_completed(futures):
+            result = future.result()
+            articles.extend(result["articles"])
+            if result["error"]:
+                failed_sources.append(result["error"])
 
     if not articles:
         fail_text = "；".join(failed_sources) if failed_sources else "无可用 RSS 源"
@@ -222,7 +247,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        print("摘要生成失败：", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
@@ -287,11 +312,6 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
     try:
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL")
-        
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url if base_url else None
-        ) if api_key else None
 
         candidates = fetch_latest_ai_articles(limit=50)
         ranked = sorted(candidates, key=score_article, reverse=True)
@@ -305,16 +325,38 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
             source_distribution[source] = source_distribution.get(source, 0) + 1
         logger.info("最终入选来源分布：%s", source_distribution)
 
-        result = [
-            {
-                "title": item["title"],
-                "url": item["url"],
-                "source": item["source"],
-                "published": item["published"].astimezone(CN_TZ).strftime("%Y-%m-%d %H:%M"),
-                "summary": summarize_in_chinese(item, client),
-            }
-            for item in selected
-        ]
+        summary_by_url = build_summary_cache_by_url()
+        reused_count = 0
+        generated_count = 0
+        client: Optional[OpenAI] = None
+
+        result = []
+        for item in selected:
+            cached_summary = summary_by_url.get(item["url"])
+            if cached_summary:
+                summary = cached_summary
+                reused_count += 1
+            else:
+                if client is None and api_key:
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url=base_url if base_url else None,
+                    )
+                summary = summarize_in_chinese(item, client)
+                summary_by_url[item["url"]] = summary
+                generated_count += 1
+
+            result.append(
+                {
+                    "title": item["title"],
+                    "url": item["url"],
+                    "source": item["source"],
+                    "published": item["published"].astimezone(CN_TZ).strftime("%Y-%m-%d %H:%M"),
+                    "summary": summary,
+                }
+            )
+
+        logger.info("摘要复用统计：reused=%d generated=%d", reused_count, generated_count)
 
         with LOCK:
             CACHE[day_key] = result
