@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -68,16 +69,48 @@ TOPIC_KEYWORDS = {
 }
 DEFAULT_TOPIC = "通用 AI"
 
-AI_RELATED_KEYWORDS = [
-    "ai", "artificial intelligence", "generative ai", "genai",
-    "model", "llm", "agent", "neural", "machine learning",
-    "text-to-video", "video generation", "video model", "image generation",
-    "sora", "veo", "runway", "stable diffusion", "diffusion",
-    "npc ai", "ai game", "ai filmmaking", "ai animation",
-    "人工智能", "生成式ai", "生成式人工智能", "大模型", "智能体",
-    "视频生成", "图像生成", "文生视频", "数字人", "虚拟制作",
+AI_STRONG_EN_KEYWORDS = [
+    "artificial intelligence",
+    "generative ai",
+    "genai",
+    "llm",
+    "large language model",
+    "machine learning",
+    "neural network",
+    "text-to-video",
+    "video generation",
+    "video model",
+    "image generation",
+    "stable diffusion",
+    "diffusion",
+    "sora",
+    "veo",
+    "runway",
 ]
+AI_STRONG_ZH_KEYWORDS = [
+    "生成式ai",
+    "生成式人工智能",
+    "人工智能",
+    "大模型",
+    "智能体",
+    "视频生成",
+    "图像生成",
+    "文生视频",
+    "数字人",
+    "虚拟制作",
+]
+AI_WEAK_EN_KEYWORDS = ["ai"]
+AI_CONTEXT_EN_KEYWORDS = [
+    "game", "gaming", "unreal", "unity", "npc",
+    "video", "film", "movie", "cinematic", "animation", "vfx", "studio",
+]
+AI_CONTEXT_ZH_KEYWORDS = ["游戏", "影视", "电影", "短片", "动画", "视频"]
+
 MIXED_CONTENT_SOURCES = {"No Film School", "Unity Blog"}
+
+AI_STRONG_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_STRONG_EN_KEYWORDS]
+AI_WEAK_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_WEAK_EN_KEYWORDS]
+AI_CONTEXT_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_CONTEXT_EN_KEYWORDS]
 
 CACHE: Dict[str, List[Dict[str, str]]] = {}
 
@@ -184,8 +217,21 @@ def is_similar_title(title: str, seen_titles: List[str], threshold: float = 0.82
 
 
 def is_ai_related(article: Dict[str, str]) -> bool:
-    text = f"{article.get('title', '')} {article.get('raw_summary', '')}".lower()
-    return any(keyword in text for keyword in AI_RELATED_KEYWORDS)
+    text = f"{article.get('title', '')} {article.get('raw_summary', '')}"
+    text_lower = text.lower()
+
+    if any(pattern.search(text) for pattern in AI_STRONG_EN_PATTERNS):
+        return True
+    if any(keyword in text_lower for keyword in AI_STRONG_ZH_KEYWORDS):
+        return True
+
+    weak_hit = any(pattern.search(text) for pattern in AI_WEAK_EN_PATTERNS)
+    if not weak_hit:
+        return False
+
+    context_en_hit = any(pattern.search(text) for pattern in AI_CONTEXT_EN_PATTERNS)
+    context_zh_hit = any(keyword in text_lower for keyword in AI_CONTEXT_ZH_KEYWORDS)
+    return context_en_hit or context_zh_hit
 
 
 def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
