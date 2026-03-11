@@ -60,7 +60,7 @@ FOCUS_DOMAIN_KEYWORDS = {
     "ai_film": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
     "ai_virtual": ["avatar", "digital human", "virtual production", "3d generation", "数字人", "虚拟制作", "3d"],
 }
-FOCUS_DOMAIN_BONUS = 3
+FOCUS_DOMAIN_BONUS = 4
 
 TOPIC_KEYWORDS = {
     "游戏": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
@@ -246,7 +246,6 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
-        source_title = feed.feed.get("title") or source_name
 
         parsed_articles: List[Dict[str, str]] = []
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
@@ -255,13 +254,13 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 {
                     "title": entry.get("title", "无标题"),
                     "url": entry.get("link", "#"),
-                    "source": source_title,
+                    "source": source_name,
                     "published": parse_entry_time(entry),
                     "raw_summary": summary,
                 }
             )
 
-        # AI相关性硬过滤：No Film School / Unity Blog 等混合来源必须先通过，其它来源同样执行该过滤
+        # 所有来源都先进行 AI 相关性过滤；混合内容来源额外记录日志
         if source_name in MIXED_CONTENT_SOURCES:
             logger.info("混合来源启用AI硬过滤 source=%s", source_name)
         source_articles = [article for article in parsed_articles if is_ai_related(article)]
@@ -348,7 +347,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        print("摘要生成失败：", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
@@ -470,7 +469,7 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
                 summary_by_url[item["url"]] = summary
                 generated_count += 1
 
-            topic = topic_by_url.get(item["url"]) or classify_article_topic(item)
+            topic = classify_article_topic(item)
             topic_by_url[item["url"]] = topic
 
             result.append(
