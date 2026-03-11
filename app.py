@@ -31,6 +31,9 @@ RSS_SOURCES = [
     {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
     {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/"},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
+    {"name": "Microsoft AI Blog", "url": "https://blogs.microsoft.com/ai/feed/"},
+    {"name": "NVIDIA AI Blog", "url": "https://blogs.nvidia.com/blog/category/ai/feed/"},
+    {"name": "AWS ML Blog", "url": "https://aws.amazon.com/blogs/machine-learning/feed/"},
 ]
 
 MAX_ITEMS = 6
@@ -45,11 +48,27 @@ LAST_ERROR = ""
 
 SOURCE_WEIGHTS = {
     "OpenAI": 4,
-    "Anthropic": 4,
     "Google AI Blog": 4,
-    "MIT Technology Review": 3,
+    "Microsoft AI": 3,
+    "NVIDIA": 3,
+    "AWS Machine Learning": 3,
     "Hugging Face": 2,
 }
+
+FOCUS_DOMAIN_KEYWORDS = {
+    "ai_game": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
+    "ai_video": ["video generation", "text-to-video", "video model", "sora", "veo", "视频生成"],
+    "ai_film": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
+    "ai_virtual": ["avatar", "digital human", "virtual production", "3d generation", "数字人", "虚拟制作", "3d"],
+}
+FOCUS_DOMAIN_BONUS = 3
+
+TOPIC_KEYWORDS = {
+    "游戏": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
+    "视频生成": ["video generation", "text-to-video", "video model", "sora", "veo", "视频生成"],
+    "影视生成": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
+}
+DEFAULT_TOPIC = "通用 AI"
 
 CACHE: Dict[str, List[Dict[str, str]]] = {}
 
@@ -106,6 +125,21 @@ def build_summary_cache_by_url() -> Dict[str, str]:
             if isinstance(url, str) and url and isinstance(summary, str) and summary:
                 summary_by_url[url] = summary
     return summary_by_url
+
+
+def build_topic_cache_by_url() -> Dict[str, str]:
+    topic_by_url: Dict[str, str] = {}
+    for items in CACHE.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            topic = item.get("topic")
+            if isinstance(url, str) and url and isinstance(topic, str) and topic:
+                topic_by_url[url] = topic
+    return topic_by_url
 
 
 def parse_entry_time(entry) -> datetime:
@@ -259,6 +293,23 @@ def get_source_weight(source: str) -> int:
     return 0
 
 
+def classify_article_topic(article: Dict[str, str]) -> str:
+    text = f"{article.get('title', '')} {article.get('raw_summary', '')}".lower()
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return topic
+    return DEFAULT_TOPIC
+
+
+def count_focus_domain_hits(article: Dict[str, str]) -> int:
+    text = f"{article['title']} {article['raw_summary']}".lower()
+    hits = 0
+    for keywords in FOCUS_DOMAIN_KEYWORDS.values():
+        if any(keyword in text for keyword in keywords):
+            hits += 1
+    return hits
+
+
 def score_article(article: Dict[str, str]) -> int:
     text = f"{article['title']} {article['raw_summary']}".lower()
     score = 0
@@ -268,6 +319,9 @@ def score_article(article: Dict[str, str]) -> int:
     ]:
         if kw in text:
             score += 2
+
+    focus_hits = count_focus_domain_hits(article)
+    score += focus_hits * FOCUS_DOMAIN_BONUS
 
     age_hours = (datetime.now(timezone.utc) - article["published"]).total_seconds() / 3600
     if age_hours <= 24:
@@ -324,8 +378,11 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
             source = item.get("source", "未知来源")
             source_distribution[source] = source_distribution.get(source, 0) + 1
         logger.info("最终入选来源分布：%s", source_distribution)
+        selected_focus_hits = sum(1 for item in selected if count_focus_domain_hits(item) > 0)
+        logger.info("最终入选重点领域命中数量：%d/%d", selected_focus_hits, len(selected))
 
         summary_by_url = build_summary_cache_by_url()
+        topic_by_url = build_topic_cache_by_url()
         reused_count = 0
         generated_count = 0
         client: Optional[OpenAI] = None
@@ -346,11 +403,15 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
                 summary_by_url[item["url"]] = summary
                 generated_count += 1
 
+            topic = topic_by_url.get(item["url"]) or classify_article_topic(item)
+            topic_by_url[item["url"]] = topic
+
             result.append(
                 {
                     "title": item["title"],
                     "url": item["url"],
                     "source": item["source"],
+                    "topic": topic,
                     "published": item["published"].astimezone(CN_TZ).strftime("%Y-%m-%d %H:%M"),
                     "summary": summary,
                 }
