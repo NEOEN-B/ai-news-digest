@@ -45,8 +45,6 @@ SEARCH_MODE_SITES = [
     "huggingface.co",
     "stability.ai",
     "developer.nvidia.com",
-    "adobe.com",
-    "blog.adobe.com",
 ]
 SEARCH_MODE_QUERIES = [
     "AI model",
@@ -194,7 +192,6 @@ def build_summary_cache_by_url() -> Dict[str, str]:
             if isinstance(url, str) and url and isinstance(summary, str) and summary:
                 summary_by_url[url] = summary
     return summary_by_url
-
 
 
 def parse_entry_time(entry) -> datetime:
@@ -477,7 +474,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        logger.warning("摘要生成失败：%s", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
