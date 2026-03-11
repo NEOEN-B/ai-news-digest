@@ -186,7 +186,6 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
-        source_title = feed.feed.get("title") or source_name
 
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
             summary = (entry.get("summary") or entry.get("description") or "").strip()
