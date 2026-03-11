@@ -1,11 +1,14 @@
 import json
+import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from threading import RLock
 from typing import Dict, List, Optional
+from urllib.request import Request, urlopen
 
 import feedparser
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -17,14 +20,22 @@ load_dotenv(override=True)
 
 app = Flask(__name__)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 RSS_SOURCES = [
-    "https://openai.com/blog/rss.xml",
-    "https://www.anthropic.com/news/rss.xml",
-    "https://huggingface.co/blog/feed.xml",
+    {"name": "OpenAI News", "url": "https://openai.com/blog/rss.xml"},
+    {"name": "Anthropic News", "url": "https://www.anthropic.com/news/rss.xml"},
+    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml"},
 ]
 
 MAX_ITEMS = 10
 MIN_ITEMS = 5
+RSS_TIMEOUT_SECONDS = 9
+DIVERSITY_PENALTY = 3
 CN_TZ = timezone(timedelta(hours=8))
 DATA_PATH = Path("data/summaries.json")
 LOCK = RLock()
@@ -87,14 +98,18 @@ def parse_entry_time(entry) -> datetime:
         or entry.get("pubDate")
         or entry.get("created")
     )
-    if not candidate:
-        return datetime.now(timezone.utc)
+    if candidate:
+        try:
+            dt = parsedate_to_datetime(candidate)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            pass
 
-    try:
-        dt = parsedate_to_datetime(candidate)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return datetime.now(timezone.utc)
+    parsed_candidate = entry.get("published_parsed") or entry.get("updated_parsed")
+    if parsed_candidate:
+        return datetime(*parsed_candidate[:6], tzinfo=timezone.utc)
+
+    return datetime.now(timezone.utc)
 
 
 def normalize_title(title: str) -> str:
@@ -110,25 +125,59 @@ def is_similar_title(title: str, seen_titles: List[str], threshold: float = 0.82
 
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
+    failed_sources: List[str] = []
 
     for source in RSS_SOURCES:
-        feed = feedparser.parse(source)
-        source_title = feed.feed.get("title", source)
+        source_name = source["name"]
+        source_url = source["url"]
+        start = time.monotonic()
 
-        for entry in feed.entries:
-            summary = (entry.get("summary") or entry.get("description") or "").strip()
-            articles.append(
-                {
-                    "title": entry.get("title", "无标题"),
-                    "url": entry.get("link", "#"),
-                    "source": source_title,
-                    "published": parse_entry_time(entry),
-                    "raw_summary": summary,
-                }
+        try:
+            req = Request(source_url, headers={"User-Agent": "ai-news-digest/1.0"})
+            with urlopen(req, timeout=RSS_TIMEOUT_SECONDS) as response:
+                content = response.read()
+
+            feed = feedparser.parse(content)
+            source_title = feed.feed.get("title") or source_name
+
+            source_count = 0
+            for entry in feed.entries:
+                summary = (entry.get("summary") or entry.get("description") or "").strip()
+                articles.append(
+                    {
+                        "title": entry.get("title", "无标题"),
+                        "url": entry.get("link", "#"),
+                        "source": source_title,
+                        "published": parse_entry_time(entry),
+                        "raw_summary": summary,
+                    }
+                )
+                source_count += 1
+
+            elapsed = time.monotonic() - start
+            logger.info(
+                "RSS抓取成功 source=%s url=%s cost=%.2fs count=%d",
+                source_name,
+                source_url,
+                elapsed,
+                source_count,
             )
+        except Exception as e:
+            elapsed = time.monotonic() - start
+            error_detail = repr(e)
+            logger.error(
+                "RSS抓取失败 source=%s url=%s cost=%.2fs reason=%s",
+                source_name,
+                source_url,
+                elapsed,
+                error_detail,
+            )
+            failed_sources.append(f"{source_name}: {error_detail}")
+            continue
 
     if not articles:
-        raise RuntimeError("资讯抓取失败：暂时无法获取 RSS 内容，请稍后重试。")
+        fail_text = "；".join(failed_sources) if failed_sources else "无可用 RSS 源"
+        raise RuntimeError(f"资讯抓取失败：{fail_text}")
 
     dedup_by_url: Dict[str, Dict[str, str]] = {}
     for item in articles:
@@ -204,6 +253,32 @@ def score_article(article: Dict[str, str]) -> int:
     return score + get_source_weight(article.get("source", ""))
 
 
+def select_diverse_articles(ranked: List[Dict[str, str]], target_count: int) -> List[Dict[str, str]]:
+    selected: List[Dict[str, str]] = []
+    source_counts: Dict[str, int] = {}
+    remaining = ranked.copy()
+
+    while remaining and len(selected) < target_count:
+        best_idx = 0
+        best_score = float("-inf")
+        for idx, item in enumerate(remaining):
+            source = item.get("source", "未知来源")
+            already_selected = source_counts.get(source, 0)
+            adjusted = score_article(item) - already_selected * DIVERSITY_PENALTY
+            if already_selected == 0:
+                adjusted += 1
+            if adjusted > best_score:
+                best_score = adjusted
+                best_idx = idx
+
+        pick = remaining.pop(best_idx)
+        selected.append(pick)
+        source = pick.get("source", "未知来源")
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    return selected
+
+
 def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
     day_key = datetime.now(CN_TZ).strftime("%Y-%m-%d")
     if not force_refresh and day_key in CACHE:
@@ -212,10 +287,6 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
     try:
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL")
-        print("BASE_URL =", os.getenv("OPENAI_BASE_URL"))
-        print("API_KEY 前10位 =", repr((api_key or "")[:10]))
-        print("API_KEY 长度 =", len(api_key or ""))
-        print("API_KEY 是否含非ASCII字符 =", any(ord(c) > 127 for c in (api_key or "")))
         
         client = OpenAI(
             api_key=api_key,
@@ -226,7 +297,13 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
         ranked = sorted(candidates, key=score_article, reverse=True)
 
         target_count = min(MAX_ITEMS, max(MIN_ITEMS, len(ranked)))
-        selected = ranked[:target_count]
+        selected = select_diverse_articles(ranked, target_count)
+
+        source_distribution: Dict[str, int] = {}
+        for item in selected:
+            source = item.get("source", "未知来源")
+            source_distribution[source] = source_distribution.get(source, 0) + 1
+        logger.info("最终入选来源分布：%s", source_distribution)
 
         result = [
             {
@@ -250,6 +327,7 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
         set_last_error("")
         return result
     except Exception:
+        logger.exception("构建每日摘要失败")
         set_last_error("抓取失败：网络或订阅源可能暂时不可用，请稍后点击“手动刷新资讯”重试。")
         return CACHE.get(day_key, [])
 
