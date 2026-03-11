@@ -247,7 +247,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        print("摘要生成失败：", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
