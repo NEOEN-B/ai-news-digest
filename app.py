@@ -60,7 +60,7 @@ FOCUS_DOMAIN_KEYWORDS = {
     "ai_film": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
     "ai_virtual": ["avatar", "digital human", "virtual production", "3d generation", "数字人", "虚拟制作", "3d"],
 }
-FOCUS_DOMAIN_BONUS = 3
+FOCUS_DOMAIN_BONUS = 4
 
 TOPIC_KEYWORDS = {
     "游戏": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
@@ -169,21 +169,6 @@ def build_summary_cache_by_url() -> Dict[str, str]:
     return summary_by_url
 
 
-def build_topic_cache_by_url() -> Dict[str, str]:
-    topic_by_url: Dict[str, str] = {}
-    for items in CACHE.values():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            url = item.get("url")
-            topic = item.get("topic")
-            if isinstance(url, str) and url and isinstance(topic, str) and topic:
-                topic_by_url[url] = topic
-    return topic_by_url
-
-
 def parse_entry_time(entry) -> datetime:
     candidate = (
         entry.get("published")
@@ -254,7 +239,6 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
             content = response.read()
 
         feed = feedparser.parse(content)
-        source_title = feed.feed.get("title") or source_name
 
         parsed_articles: List[Dict[str, str]] = []
         for entry in feed.entries[:MAX_ENTRIES_PER_SOURCE]:
@@ -263,13 +247,13 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 {
                     "title": entry.get("title", "无标题"),
                     "url": entry.get("link", "#"),
-                    "source": source_title,
+                    "source": source_name,
                     "published": parse_entry_time(entry),
                     "raw_summary": summary,
                 }
             )
 
-        # AI相关性硬过滤：所有来源执行过滤；混合来源必须命中强AI关键词
+        # AI相关性硬过滤：所有来源都先过滤；混合来源必须命中强AI关键词
         if source_name in MIXED_CONTENT_SOURCES:
             logger.info("混合来源启用更严格AI过滤 source=%s", source_name)
             source_articles = [
@@ -301,7 +285,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
         )
         return {"articles": [], "error": f"{source_name}: {error_detail}"}
 
-
+      
 def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
@@ -372,7 +356,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        print("摘要生成失败：", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
@@ -473,7 +457,6 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
         logger.info("最终入选重点领域命中数量：%d/%d", selected_focus_hits, len(selected))
 
         summary_by_url = build_summary_cache_by_url()
-        topic_by_url = build_topic_cache_by_url()
         reused_count = 0
         generated_count = 0
         client: Optional[OpenAI] = None
@@ -494,8 +477,7 @@ def build_daily_digest(force_refresh: bool = False) -> List[Dict[str, str]]:
                 summary_by_url[item["url"]] = summary
                 generated_count += 1
 
-            topic = topic_by_url.get(item["url"]) or classify_article_topic(item)
-            topic_by_url[item["url"]] = topic
+            topic = classify_article_topic(item)
 
             result.append(
                 {
