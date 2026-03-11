@@ -160,7 +160,7 @@ def fetch_source_articles(source: Dict[str, str]) -> Dict[str, object]:
                 {
                     "title": entry.get("title", "无标题"),
                     "url": entry.get("link", "#"),
-                    "source": source_title,
+                    "source": source_name,
                     "published": parse_entry_time(entry),
                     "raw_summary": summary,
                 }
