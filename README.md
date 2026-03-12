@@ -8,6 +8,7 @@
 4. 支持网页手动刷新 + 每天上午 8:00 自动刷新
 5. 当天摘要持久化保存到 `data/summaries.json`（重启不丢失）
 6. RSS 多源抓取带超时与故障隔离，单个源失败不影响整体
+7. 支持本地 JSON 收藏与按日期归档查看（无需数据库）
 
 默认订阅源：OpenAI News、Google AI Blog、Hugging Face Blog、NVIDIA Omniverse Blog、Stability AI Blog、DeepMind Blog。
 
@@ -78,6 +79,8 @@ SERPER_MODE=news  # 可选：news(默认) / search
 - **自动任务**：使用 `APScheduler` 每天北京时间 **08:00** 自动抓取并生成当天摘要。
 - **双模式采集**：支持 `RSS 稳定模式`（默认）与 `Google Search 近 3 天热点模式`，可在前端一键切换。
 - **持久化**：摘要写入 `data/summaries.json`，服务重启后仍可读取。
+- **收藏功能**：每条资讯支持“收藏/取消收藏”，收藏数据写入 `data/favorites.json`，保存 `title/url/source/topic/published/summary/mode/favorited_at` 字段。
+- **归档功能**：每日结果按 `YYYY-MM-DD:mode` 保留在 `data/summaries.json` 中；页面可切换“历史归档”并选择日期回看。
 - **去重策略**：
   - 先按 URL 去重；
   - 再按标题相似度去重（避免多站转载重复展示）。
@@ -125,7 +128,8 @@ SERPER_MODE=news  # 可选：news(默认) / search
 ├── requirements.txt
 ├── .env.example
 ├── data/
-│   └── summaries.json
+│   ├── summaries.json
+│   └── favorites.json
 ├── templates/
 │   └── index.html
 └── static/

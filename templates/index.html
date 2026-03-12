@@ -32,6 +32,24 @@
             </div>
 
             <div class="filter-group">
+              <label for="view" class="filter-label">资讯视图</label>
+              <select id="view" name="view" onchange="this.form.submit()">
+                <option value="all" {% if selected_view == 'all' %}selected{% endif %}>全部资讯</option>
+                <option value="favorites" {% if selected_view == 'favorites' %}selected{% endif %}>仅看收藏</option>
+                <option value="archive" {% if selected_view == 'archive' %}selected{% endif %}>历史归档</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="archive_date" class="filter-label">归档日期</label>
+              <select id="archive_date" name="archive_date" onchange="this.form.submit()" {% if selected_view != 'archive' %}disabled{% endif %}>
+                {% for date in archive_dates %}
+                <option value="{{ date }}" {% if selected_archive_date == date %}selected{% endif %}>{{ date }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="filter-group">
               <label for="source" class="filter-label">来源筛选</label>
               <select id="source" name="source" onchange="this.form.submit()">
                 <option value="all" {% if selected_source == 'all' %}selected{% endif %}>全部来源</option>
@@ -53,9 +71,11 @@
           </form>
 
           <form action="{{ url_for('refresh_news') }}" method="post" id="refreshForm">
-            <input type="hidden" name="source" value="{{ selected_source }}" />
-            <input type="hidden" name="topic" value="{{ selected_topic }}" />
-            <input type="hidden" name="mode" value="{{ selected_mode }}" />
+            <input type="hidden" name="source" id="refreshSource" value="{{ selected_source }}" />
+            <input type="hidden" name="topic" id="refreshTopic" value="{{ selected_topic }}" />
+            <input type="hidden" name="mode" id="refreshMode" value="{{ selected_mode }}" />
+            <input type="hidden" name="view" id="refreshView" value="{{ selected_view }}" />
+            <input type="hidden" name="archive_date" id="refreshArchiveDate" value="{{ selected_archive_date }}" />
             <button type="submit" class="refresh-btn" id="refreshBtn">手动刷新资讯</button>
           </form>
         </div>
@@ -65,6 +85,12 @@
       <section class="mode-note" role="note">
         <p>🔎 Search 模式会优先抓取最近 3 天热点资讯，摘要为分析型解读（非简单翻译）。</p>
         <p>若结果较少，建议切换回 <strong>RSS 稳定模式</strong> 获取更稳定的资讯底座。</p>
+      </section>
+      {% endif %}
+
+      {% if selected_view == 'archive' %}
+      <section class="mode-note" role="status">
+        <p>🗂️ 正在查看归档日期：<strong>{{ selected_archive_date }}</strong>（{{ 'Search 模式' if selected_mode == 'search' else 'RSS 模式' }}）</p>
       </section>
       {% endif %}
 
@@ -94,8 +120,11 @@
 
         <article class="card">
           <div class="card-tags">
-            <span class="tag tag-mode">{{ 'Search' if selected_mode == 'search' else 'RSS' }}</span>
+            <span class="tag tag-mode">{{ 'Search' if (item.mode or selected_mode) == 'search' else 'RSS' }}</span>
             <span class="tag tag-topic">{{ item.topic or '通用 AI' }}</span>
+            {% if item.is_favorited %}
+            <span class="tag tag-favorite">已收藏</span>
+            {% endif %}
           </div>
           <h2>
             <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
@@ -103,13 +132,38 @@
           <p class="info">来源：{{ source_view }} · 发布时间：{{ item.published }}</p>
           <p class="summary summary-collapsed">{{ item.summary }}</p>
           <button type="button" class="toggle-btn">展开</button>
-          <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+          <div class="card-actions-row">
+            <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+            <form action="{{ url_for('favorite_toggle') }}" method="post" class="favorite-form">
+              <input type="hidden" name="title" value="{{ item.title }}" />
+              <input type="hidden" name="url" value="{{ item.url }}" />
+              <input type="hidden" name="article_source" value="{{ item.source }}" />
+              <input type="hidden" name="article_topic" value="{{ item.topic or '通用 AI' }}" />
+              <input type="hidden" name="published" value="{{ item.published }}" />
+              <input type="hidden" name="summary" value="{{ item.summary }}" />
+              <input type="hidden" name="article_mode" value="{{ item.mode or selected_mode }}" />
+              <input type="hidden" name="source" value="{{ selected_source }}" />
+              <input type="hidden" name="topic" value="{{ selected_topic }}" />
+              <input type="hidden" name="mode" value="{{ selected_mode }}" />
+              <input type="hidden" name="view" value="{{ selected_view }}" />
+              <input type="hidden" name="archive_date" value="{{ selected_archive_date }}" />
+              <button type="submit" class="favorite-btn {{ 'active' if item.is_favorited else '' }}">
+                {{ '取消收藏' if item.is_favorited else '收藏' }}
+              </button>
+            </form>
+          </div>
         </article>
         {% endfor %}
       </section>
       {% else %}
       <section class="empty-state">
-        {% if selected_mode == 'search' %}
+        {% if selected_view == 'favorites' %}
+        <p class="empty-title">你还没有收藏资讯</p>
+        <p class="empty-subtitle">可在资讯卡片点击“收藏”，后续可在“仅看收藏”里快速回看。</p>
+        {% elif selected_view == 'archive' %}
+        <p class="empty-title">该日期暂无归档资讯</p>
+        <p class="empty-subtitle">可切换其他日期，或返回“全部资讯”查看今日内容。</p>
+        {% elif selected_mode == 'search' %}
         <p class="empty-title">Search 模式下暂无可展示的热点资讯</p>
         <p class="empty-subtitle">可尝试点击“手动刷新资讯”，或切换回 RSS 稳定模式查看更完整的资讯列表。</p>
         {% else %}
@@ -123,8 +177,22 @@
     <script>
       const refreshForm = document.getElementById("refreshForm");
       const refreshBtn = document.getElementById("refreshBtn");
+      const refreshSource = document.getElementById("refreshSource");
+      const refreshTopic = document.getElementById("refreshTopic");
+      const refreshMode = document.getElementById("refreshMode");
+      const refreshView = document.getElementById("refreshView");
+      const refreshArchiveDate = document.getElementById("refreshArchiveDate");
+
       if (refreshForm && refreshBtn) {
         refreshForm.addEventListener("submit", () => {
+          const params = new URLSearchParams(window.location.search);
+
+          if (refreshSource) refreshSource.value = params.get("source") || "all";
+          if (refreshTopic) refreshTopic.value = params.get("topic") || "all";
+          if (refreshMode) refreshMode.value = params.get("mode") || "rss";
+          if (refreshView) refreshView.value = params.get("view") || "all";
+          if (refreshArchiveDate) refreshArchiveDate.value = params.get("archive_date") || "";
+
           refreshBtn.disabled = true;
           refreshBtn.textContent = "刷新中...";
         });

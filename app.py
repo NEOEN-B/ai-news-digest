@@ -90,6 +90,7 @@ MAX_ENTRIES_PER_SOURCE = 18
 DIVERSITY_PENALTY = 3
 CN_TZ = timezone(timedelta(hours=8))
 DATA_PATH = Path("data/summaries.json")
+FAVORITES_PATH = Path("data/favorites.json")
 LOCK = RLock()
 LAST_ERROR = ""
 
@@ -178,6 +179,8 @@ def ensure_data_file() -> None:
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not DATA_PATH.exists():
         DATA_PATH.write_text("{}", encoding="utf-8")
+    if not FAVORITES_PATH.exists():
+        FAVORITES_PATH.write_text("[]", encoding="utf-8")
 
 
 def load_persisted_cache() -> None:
@@ -215,6 +218,52 @@ def build_summary_cache_by_url() -> Dict[str, str]:
             if isinstance(url, str) and url and isinstance(summary, str) and summary:
                 summary_by_url[url] = summary
     return summary_by_url
+
+
+def load_favorites() -> List[Dict[str, str]]:
+    ensure_data_file()
+    try:
+        data = json.loads(FAVORITES_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    except (json.JSONDecodeError, OSError):
+        logger.warning("收藏读取失败，将返回空列表")
+    return []
+
+
+def save_favorites(favorites: List[Dict[str, str]]) -> None:
+    ensure_data_file()
+    try:
+        FAVORITES_PATH.write_text(
+            json.dumps(favorites, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("收藏保存失败")
+
+
+def list_archive_dates(mode: str) -> List[str]:
+    date_keys = {
+        key.split(":", 1)[0]
+        for key in CACHE.keys()
+        if isinstance(key, str) and key.endswith(f":{mode}")
+    }
+    return sorted(date_keys, reverse=True)
+
+
+def resolve_archive_date(selected_date: str, mode: str) -> str:
+    available_dates = list_archive_dates(mode)
+    if selected_date and selected_date in available_dates:
+        return selected_date
+    today = datetime.now(CN_TZ).strftime("%Y-%m-%d")
+    if today in available_dates:
+        return today
+    return available_dates[0] if available_dates else today
+
+
+def get_archive_items(date_key: str, mode: str) -> List[Dict[str, str]]:
+    return CACHE.get(f"{date_key}:{mode}", [])
+
 
 
 def parse_entry_time(entry) -> datetime:
@@ -645,6 +694,7 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss") -> List[D
                     "topic": topic,
                     "published": item["published"].astimezone(CN_TZ).strftime("%Y-%m-%d %H:%M"),
                     "summary": summary,
+                    "mode": mode,
                 }
             )
 
@@ -675,18 +725,52 @@ def index():
     selected_source = request.args.get("source", "all")
     selected_topic = request.args.get("topic", "all")
     selected_mode = request.args.get("mode", "rss")
+    selected_view = request.args.get("view", "all")
+    selected_archive_date = request.args.get("archive_date", "")
+
     all_items = build_daily_digest(mode=selected_mode)
     available_sources = sorted({item.get("source", "未知来源") for item in all_items})
     available_topics = ["游戏", "视频生成", "影视生成", "通用 AI"]
 
-    items = all_items
+    archive_dates = list_archive_dates(selected_mode)
+    resolved_archive_date = resolve_archive_date(selected_archive_date, selected_mode)
+
+    favorites = load_favorites()
+    favorites_by_url = {item.get("url"): item for item in favorites if item.get("url")}
+
+    if selected_view == "favorites":
+        favorites_sorted = sorted(
+            favorites,
+            key=lambda x: x.get("favorited_at", ""),
+            reverse=True,
+        )
+        items = [
+            {
+                "title": item.get("title", "无标题"),
+                "url": item.get("url", "#"),
+                "source": item.get("source", "未知来源"),
+                "topic": item.get("topic", DEFAULT_TOPIC),
+                "published": item.get("published", ""),
+                "summary": item.get("summary", ""),
+                "mode": item.get("mode", selected_mode),
+            }
+            for item in favorites_sorted
+        ]
+    elif selected_view == "archive":
+        items = get_archive_items(resolved_archive_date, selected_mode)
+    else:
+        items = all_items
+
     if selected_source != "all":
         items = [item for item in items if item.get("source") == selected_source]
     if selected_topic != "all":
-        items = [item for item in items if item.get("topic", "通用 AI") == selected_topic]
+        items = [item for item in items if item.get("topic", DEFAULT_TOPIC) == selected_topic]
+
+    for item in items:
+        item["is_favorited"] = item.get("url") in favorites_by_url
 
     mode_hint = ""
-    if selected_mode == "search" and len(items) < MIN_ITEMS:
+    if selected_mode == "search" and len(items) < MIN_ITEMS and selected_view == "all":
         mode_hint = "Search 模式近 3 天可用高质量结果较少，建议切换到 RSS 稳定模式查看更多资讯。"
 
     return render_template(
@@ -699,6 +783,9 @@ def index():
         selected_source=selected_source,
         selected_topic=selected_topic,
         selected_mode=selected_mode,
+        selected_view=selected_view,
+        selected_archive_date=resolved_archive_date,
+        archive_dates=archive_dates,
         mode_hint=mode_hint,
     )
 
@@ -708,8 +795,73 @@ def refresh_news():
     selected_source = request.form.get("source", "all")
     selected_topic = request.form.get("topic", "all")
     selected_mode = request.form.get("mode", "rss")
+    selected_view = request.form.get("view", "all")
+    selected_archive_date = request.form.get("archive_date", "")
     build_daily_digest(force_refresh=True, mode=selected_mode)
-    return redirect(url_for("index", source=selected_source, topic=selected_topic, mode=selected_mode))
+    return redirect(
+        url_for(
+            "index",
+            source=selected_source,
+            topic=selected_topic,
+            mode=selected_mode,
+            view=selected_view,
+            archive_date=selected_archive_date,
+        )
+    )
+
+
+@app.route("/favorite-toggle", methods=["POST"])
+def favorite_toggle():
+    selected_source = request.form.get("source", "all")
+    selected_topic = request.form.get("topic", "all")
+    selected_mode = request.form.get("mode", "rss")
+    selected_view = request.form.get("view", "all")
+    selected_archive_date = request.form.get("archive_date", "")
+
+    article_url = request.form.get("url", "").strip()
+    if not article_url:
+        return redirect(
+            url_for(
+                "index",
+                source=selected_source,
+                topic=selected_topic,
+                mode=selected_mode,
+                view=selected_view,
+                archive_date=selected_archive_date,
+            )
+        )
+
+    favorites = load_favorites()
+    favorite_index = next((idx for idx, item in enumerate(favorites) if item.get("url") == article_url), None)
+
+    if favorite_index is not None:
+        favorites.pop(favorite_index)
+    else:
+        favorites.append(
+            {
+                "title": request.form.get("title", "无标题"),
+                "url": article_url,
+                "source": request.form.get("article_source", "未知来源"),
+                "topic": request.form.get("article_topic", DEFAULT_TOPIC),
+                "published": request.form.get("published", ""),
+                "summary": request.form.get("summary", ""),
+                "mode": request.form.get("article_mode", selected_mode),
+                "favorited_at": datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+
+    save_favorites(favorites)
+
+    return redirect(
+        url_for(
+            "index",
+            source=selected_source,
+            topic=selected_topic,
+            mode=selected_mode,
+            view=selected_view,
+            archive_date=selected_archive_date,
+        )
+    )
 
 
 def start_scheduler() -> BackgroundScheduler:
