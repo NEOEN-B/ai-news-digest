@@ -46,7 +46,7 @@ cp .env.example .env
 ### 2) 启动服务
 
 ```bash
-gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:5000 app:app
+gunicorn -w 1 -b 0.0.0.0:$PORT --timeout 180 app:app
 ```
 
 说明：
