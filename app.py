@@ -271,17 +271,6 @@ AI_CONTEXT_ZH_KEYWORDS = [
     "智能体",
     "技能",
 ]
-available_topics = [
-    "游戏",
-    "视频生成",
-    "影视生成",
-    "AI Agent",
-    "AI Skills",
-    "图片生成",
-    "3D生成",
-    "流程自动化",
-    "通用 AI",
-]
 
 MIXED_CONTENT_SOURCES = {"NVIDIA Omniverse Blog"}
 
@@ -1046,7 +1035,10 @@ def index():
 
     all_items = build_daily_digest(mode=selected_mode)
     available_sources = sorted({item.get("source", "未知来源") for item in all_items})
-    available_topics = ["游戏", "视频生成", "影视生成", "通用 AI"]
+    
+    available_topics = list(TOPIC_KEYWORDS.keys())
+    if DEFAULT_TOPIC not in available_topics:
+        available_topics.append(DEFAULT_TOPIC)
 
     archive_dates = list_archive_dates(selected_mode)
     resolved_archive_date = resolve_archive_date(selected_archive_date, selected_mode)
