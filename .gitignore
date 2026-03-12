@@ -1,4 +1,5 @@
 .env
 .venv/
 __pycache__/
-data/summaries.json
+*.pyc
+data/favorites.json
