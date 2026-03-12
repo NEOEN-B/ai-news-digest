@@ -45,8 +45,6 @@ SEARCH_MODE_SITES = [
     "huggingface.co",
     "stability.ai",
     "developer.nvidia.com",
-    "adobe.com",
-    "blog.adobe.com",
 ]
 SEARCH_ALLOWED_HOSTS = {
     "openai.com",
@@ -563,7 +561,7 @@ def summarize_in_chinese(article: Dict[str, str], client: Optional[OpenAI]) -> s
         text = (resp.choices[0].message.content or "").strip()
         return text[:300] if text else fallback
     except Exception as e:
-        logger.warning("摘要生成失败：%s", repr(e))
+        logger.warning("摘要生成失败：%r", e)
         return fallback
 
 
@@ -638,10 +636,6 @@ def select_diverse_articles(ranked: List[Dict[str, str]], target_count: int) -> 
         source_counts[source] = source_counts.get(source, 0) + 1
 
     return selected
-
-
-
-
 
 
 def get_recent_history_urls(day_key: str, max_rounds: int = 5) -> List[str]:
@@ -933,6 +927,11 @@ def index():
     favorites_by_url = {item.get("url"): item for item in favorites if item.get("url")}
 
     if selected_view == "favorites":
+        favorites_sorted = sorted(
+            favorites,
+            key=lambda x: x.get("favorited_at", ""),
+            reverse=True,
+        )
         items = [
             {
                 "title": item.get("title", "无标题"),
@@ -943,7 +942,7 @@ def index():
                 "summary": item.get("summary", ""),
                 "mode": item.get("mode", selected_mode),
             }
-            for item in favorites
+            for item in favorites_sorted
         ]
     elif selected_view == "archive":
         items = get_archive_items(resolved_archive_date, selected_mode)
@@ -1021,10 +1020,10 @@ def favorite_toggle():
         )
 
     favorites = load_favorites()
-    exists = next((idx for idx, item in enumerate(favorites) if item.get("url") == article_url), None)
+    favorite_index = next((idx for idx, item in enumerate(favorites) if item.get("url") == article_url), None)
 
-    if exists is not None:
-        favorites.pop(exists)
+    if favorite_index is not None:
+        favorites.pop(favorite_index)
     else:
         favorites.append(
             {
