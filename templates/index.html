@@ -11,27 +11,88 @@
       <header class="page-header">
         <div>
           <p class="badge">每日更新</p>
-          <h1>AI 资讯早报</h1>
+          <h1>AI 资讯分析器</h1>
           <p class="meta">自动更新时间：{{ updated_at }}（北京时间）</p>
+          <p class="mode-banner">
+            当前模式：
+            <span class="mode-pill {{ 'mode-search' if selected_mode == 'search' else 'mode-rss' }}">
+              {{ 'Search 近 3 天热点模式' if selected_mode == 'search' else 'RSS 稳定模式' }}
+            </span>
+          </p>
         </div>
 
         <div class="actions">
           <form action="{{ url_for('index') }}" method="get" class="filter-form">
-            <label for="source" class="filter-label">按来源筛选</label>
-            <select id="source" name="source" onchange="this.form.submit()">
-              <option value="all" {% if selected_source == 'all' %}selected{% endif %}>全部来源</option>
-              {% for source in sources %}
-              <option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>
-              {% endfor %}
-            </select>
+            <div class="filter-group">
+              <label for="mode" class="filter-label">模式切换</label>
+              <select id="mode" name="mode" onchange="this.form.submit()">
+                <option value="rss" {% if selected_mode == 'rss' %}selected{% endif %}>RSS 稳定模式</option>
+                <option value="search" {% if selected_mode == 'search' %}selected{% endif %}>Search 近 3 天热点模式</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="view" class="filter-label">资讯视图</label>
+              <select id="view" name="view" onchange="this.form.submit()">
+                <option value="all" {% if selected_view == 'all' %}selected{% endif %}>全部资讯</option>
+                <option value="favorites" {% if selected_view == 'favorites' %}selected{% endif %}>仅看收藏</option>
+                <option value="archive" {% if selected_view == 'archive' %}selected{% endif %}>历史归档</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="archive_date" class="filter-label">归档日期</label>
+              <select id="archive_date" name="archive_date" onchange="this.form.submit()" {% if selected_view != 'archive' %}disabled{% endif %}>
+                {% for date in archive_dates %}
+                <option value="{{ date }}" {% if selected_archive_date == date %}selected{% endif %}>{{ date }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="source" class="filter-label">来源筛选</label>
+              <select id="source" name="source" onchange="this.form.submit()">
+                <option value="all" {% if selected_source == 'all' %}selected{% endif %}>全部来源</option>
+                {% for source in sources %}
+                <option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="topic" class="filter-label">主题筛选</label>
+              <select id="topic" name="topic" onchange="this.form.submit()">
+                <option value="all" {% if selected_topic == 'all' %}selected{% endif %}>全部主题</option>
+                {% for topic in topics %}
+                <option value="{{ topic }}" {% if selected_topic == topic %}selected{% endif %}>{{ topic }}</option>
+                {% endfor %}
+              </select>
+            </div>
           </form>
 
           <form action="{{ url_for('refresh_news') }}" method="post" id="refreshForm">
             <input type="hidden" name="source" value="{{ selected_source }}" />
+            <input type="hidden" name="topic" value="{{ selected_topic }}" />
+            <input type="hidden" name="mode" value="{{ selected_mode }}" />
+            <input type="hidden" name="view" value="{{ selected_view }}" />
+            <input type="hidden" name="archive_date" value="{{ selected_archive_date }}" />
             <button type="submit" class="refresh-btn" id="refreshBtn">手动刷新资讯</button>
           </form>
         </div>
       </header>
+
+      {% if selected_mode == 'search' %}
+      <section class="mode-note" role="note">
+        <p>🔎 Search 模式会优先抓取最近 3 天热点资讯，摘要为分析型解读（非简单翻译）。</p>
+        <p>若结果较少，建议切换回 <strong>RSS 稳定模式</strong> 获取更稳定的资讯底座。</p>
+      </section>
+      {% endif %}
+
+      {% if selected_view == 'archive' %}
+      <section class="mode-note" role="status">
+        <p>🗂️ 正在查看归档日期：<strong>{{ selected_archive_date }}</strong>（{{ 'Search 模式' if selected_mode == 'search' else 'RSS 模式' }}）</p>
+      </section>
+      {% endif %}
 
       {% if error_message %}
       <section class="alert" role="alert">
@@ -39,24 +100,76 @@
       </section>
       {% endif %}
 
+      {% if mode_hint %}
+      <section class="alert" role="status">
+        💡 {{ mode_hint }}
+      </section>
+      {% endif %}
+
       {% if items %}
       <section class="news-grid">
         {% for item in items %}
+        {% set source_view = item.source %}
+        {% if item.source == 'deepmind.google' %}
+          {% set source_view = 'DeepMind Blog' %}
+        {% elif item.source == 'huggingface.co' %}
+          {% set source_view = 'Hugging Face' %}
+        {% elif item.source == 'developer.nvidia.com' %}
+          {% set source_view = 'NVIDIA Developer Blog' %}
+        {% endif %}
+
         <article class="card">
+          <div class="card-tags">
+            <span class="tag tag-mode">{{ 'Search' if (item.mode or selected_mode) == 'search' else 'RSS' }}</span>
+            <span class="tag tag-topic">{{ item.topic or '通用 AI' }}</span>
+            {% if item.is_favorited %}
+            <span class="tag tag-favorite">已收藏</span>
+            {% endif %}
+          </div>
           <h2>
             <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
           </h2>
-          <p class="info">{{ item.source }} · {{ item.published }}</p>
+          <p class="info">来源：{{ source_view }} · 发布时间：{{ item.published }}</p>
           <p class="summary summary-collapsed">{{ item.summary }}</p>
           <button type="button" class="toggle-btn">展开</button>
-          <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+          <div class="card-actions-row">
+            <a class="readmore" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+            <form action="{{ url_for('favorite_toggle') }}" method="post" class="favorite-form">
+              <input type="hidden" name="title" value="{{ item.title }}" />
+              <input type="hidden" name="url" value="{{ item.url }}" />
+              <input type="hidden" name="article_source" value="{{ item.source }}" />
+              <input type="hidden" name="article_topic" value="{{ item.topic or '通用 AI' }}" />
+              <input type="hidden" name="published" value="{{ item.published }}" />
+              <input type="hidden" name="summary" value="{{ item.summary }}" />
+              <input type="hidden" name="article_mode" value="{{ item.mode or selected_mode }}" />
+              <input type="hidden" name="source" value="{{ selected_source }}" />
+              <input type="hidden" name="topic" value="{{ selected_topic }}" />
+              <input type="hidden" name="mode" value="{{ selected_mode }}" />
+              <input type="hidden" name="view" value="{{ selected_view }}" />
+              <input type="hidden" name="archive_date" value="{{ selected_archive_date }}" />
+              <button type="submit" class="favorite-btn {{ 'active' if item.is_favorited else '' }}">
+                {{ '取消收藏' if item.is_favorited else '收藏' }}
+              </button>
+            </form>
+          </div>
         </article>
         {% endfor %}
       </section>
       {% else %}
       <section class="empty-state">
-        <p class="empty-title">今天还没有可展示的资讯</p>
-        <p class="empty-subtitle">你可以稍后再来，或点击上方“手动刷新资讯”按钮重试。</p>
+        {% if selected_view == 'favorites' %}
+        <p class="empty-title">你还没有收藏资讯</p>
+        <p class="empty-subtitle">可在资讯卡片点击“收藏”，后续可在“仅看收藏”里快速回看。</p>
+        {% elif selected_view == 'archive' %}
+        <p class="empty-title">该日期暂无归档资讯</p>
+        <p class="empty-subtitle">可切换其他日期，或返回“全部资讯”查看今日内容。</p>
+        {% elif selected_mode == 'search' %}
+        <p class="empty-title">Search 模式下暂无可展示的热点资讯</p>
+        <p class="empty-subtitle">可尝试点击“手动刷新资讯”，或切换回 RSS 稳定模式查看更完整的资讯列表。</p>
+        {% else %}
+        <p class="empty-title">RSS 稳定模式下暂无可展示的资讯</p>
+        <p class="empty-subtitle">请稍后重试，或切换到 Search 近 3 天热点模式查看最新热点动态。</p>
+        {% endif %}
       </section>
       {% endif %}
     </main>
