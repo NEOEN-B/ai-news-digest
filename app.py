@@ -637,7 +637,77 @@ def select_diverse_articles(ranked: List[Dict[str, str]], target_count: int) -> 
     return selected
 
 
-def build_daily_digest(force_refresh: bool = False, mode: str = "rss") -> List[Dict[str, str]]:
+def rotate_equal_score_groups(ranked: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    if not ranked:
+        return ranked
+    rotated: List[Dict[str, str]] = []
+    idx = 0
+    while idx < len(ranked):
+        current_score = score_article(ranked[idx])
+        end = idx + 1
+        while end < len(ranked) and score_article(ranked[end]) == current_score:
+            end += 1
+        group = ranked[idx:end]
+        if len(group) > 1:
+            group = group[1:] + group[:1]
+        rotated.extend(group)
+        idx = end
+    return rotated
+
+
+def select_with_novelty(
+    ranked: List[Dict[str, str]],
+    target_count: int,
+    previous_urls: List[str],
+    mode: str,
+) -> tuple[List[Dict[str, str]], int, int]:
+    selected = select_diverse_articles(ranked, target_count)
+    if not selected:
+        return selected, 0, 0
+
+    previous_set = {url for url in previous_urls if url}
+    if not previous_set:
+        return selected, 0, 0
+
+    selected_urls = {item.get("url") for item in selected}
+    candidate_pool = [
+        item for item in ranked
+        if item.get("url") not in previous_set and item.get("url") not in selected_urls
+    ]
+
+    replacement_cap = 2 if mode == "search" else 1
+    replaced_count = 0
+
+    replaceable = [
+        (idx, item) for idx, item in enumerate(selected)
+        if item.get("url") in previous_set
+    ]
+    replaceable.sort(key=lambda pair: score_article(pair[1]))
+
+    for idx, old_item in replaceable:
+        if replaced_count >= replacement_cap or not candidate_pool:
+            break
+
+        old_score = score_article(old_item)
+        min_required = old_score - (1 if mode == "search" else 0)
+        replacement_idx = next(
+            (
+                i for i, candidate in enumerate(candidate_pool)
+                if score_article(candidate) >= min_required
+            ),
+            None,
+        )
+        if replacement_idx is None:
+            continue
+
+        new_item = candidate_pool.pop(replacement_idx)
+        selected[idx] = new_item
+        replaced_count += 1
+
+    overlap_count = sum(1 for item in selected if item.get("url") in previous_set)
+    return selected, overlap_count, replaced_count
+
+def build_daily_digest(force_refresh: bool = False, mode: str = "rss", refresh_reason: str = "auto") -> List[Dict[str, str]]:
     day_key = f"{datetime.now(CN_TZ).strftime('%Y-%m-%d')}:{mode}"
     if not force_refresh and day_key in CACHE:
         return CACHE[day_key]
@@ -650,10 +720,32 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss") -> List[D
             candidates = search_recent_ai_news(limit=80)
         else:
             candidates = fetch_latest_ai_articles(limit=50)
+
+        previous_items = CACHE.get(day_key, [])
+        previous_urls = [
+            item.get("url", "")
+            for item in previous_items
+            if isinstance(item, dict)
+        ]
+
         ranked = sorted(candidates, key=score_article, reverse=True)
+        if mode == "search" and refresh_reason == "manual":
+            ranked = rotate_equal_score_groups(ranked)
 
         target_count = min(MAX_ITEMS, max(MIN_ITEMS, len(ranked)))
-        selected = select_diverse_articles(ranked, target_count)
+        selected, overlap_count, replaced_count = select_with_novelty(
+            ranked,
+            target_count,
+            previous_urls,
+            mode,
+        )
+        logger.info(
+            "候选与轮换统计 mode=%s candidate_count=%d overlap_with_previous=%d replaced_count=%d",
+            mode,
+            len(candidates),
+            overlap_count,
+            replaced_count,
+        )
 
         source_distribution: Dict[str, int] = {}
         for item in selected:
@@ -717,7 +809,7 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss") -> List[D
 
 
 def scheduled_daily_refresh() -> None:
-    build_daily_digest(force_refresh=True, mode="rss")
+    build_daily_digest(force_refresh=True, mode="rss", refresh_reason="scheduled")
 
 
 @app.route("/")
@@ -797,7 +889,7 @@ def refresh_news():
     selected_mode = request.form.get("mode", "rss")
     selected_view = request.form.get("view", "all")
     selected_archive_date = request.form.get("archive_date", "")
-    build_daily_digest(force_refresh=True, mode=selected_mode)
+    build_daily_digest(force_refresh=True, mode=selected_mode, refresh_reason="manual")
     return redirect(
         url_for(
             "index",
