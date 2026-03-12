@@ -116,17 +116,80 @@ SOURCE_WEIGHTS = {
 }
 
 FOCUS_DOMAIN_KEYWORDS = {
-    "ai_game": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
-    "ai_video": ["video generation", "text-to-video", "video model", "sora", "veo", "视频生成"],
-    "ai_film": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
-    "ai_virtual": ["avatar", "digital human", "virtual production", "3d generation", "数字人", "虚拟制作", "3d"],
+    "ai_game": [
+        "game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏",
+    ],
+    "ai_video": [
+        "video generation", "text-to-video", "video model", "video diffusion",
+        "sora", "veo", "视频生成", "文生视频",
+    ],
+    "ai_film": [
+        "film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio",
+        "影视", "电影", "短片", "动画",
+    ],
+    "ai_agent": [
+        "agent", "ai agent", "autonomous agent", "multi-agent", "tool use",
+        "tool calling", "function calling", "computer use", "browser use",
+        "智能体", "多智能体", "工具调用", "函数调用", "代理工作流",
+    ],
+    "ai_skills": [
+        "skills", "skill", "tool", "workflow", "orchestration",
+        "reasoning system", "capability", "agent skill",
+        "插件", "技能", "工具链", "工作流编排", "能力调用",
+    ],
+    "ai_image": [
+        "image generation", "text-to-image", "image model", "image editing",
+        "diffusion", "stable diffusion", "flux", "midjourney",
+        "图像生成", "文生图", "图片生成", "图像编辑",
+    ],
+    "ai_3d": [
+        "3d generation", "3d model", "3d asset", "mesh generation",
+        "gaussian splatting", "world model", "scene generation",
+        "3d生成", "3d模型", "三维生成", "网格生成", "场景生成",
+    ],
+    "ai_automation": [
+        "automation", "workflow automation", "process automation",
+        "orchestration", "enterprise automation", "agent workflow",
+        "自动化", "流程自动化", "工作流自动化", "自动化编排",
+    ],
 }
 FOCUS_DOMAIN_BONUS = 4
 
 TOPIC_KEYWORDS = {
-    "游戏": ["game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏"],
-    "视频生成": ["video generation", "text-to-video", "video model", "sora", "veo", "视频生成"],
-    "影视生成": ["film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio", "影视", "电影", "短片", "动画"],
+    "游戏": [
+        "game", "gaming", "unreal", "unity", "npc", "gameplay", "游戏",
+    ],
+    "视频生成": [
+        "video generation", "text-to-video", "video model", "video diffusion",
+        "sora", "veo", "视频生成", "文生视频",
+    ],
+    "影视生成": [
+        "film", "movie", "cinematic", "filmmaking", "animation", "vfx", "studio",
+        "影视", "电影", "短片", "动画",
+    ],
+    "AI Agent": [
+        "agent", "ai agent", "autonomous agent", "multi-agent", "tool use",
+        "tool calling", "function calling", "computer use", "browser use",
+        "智能体", "多智能体", "工具调用", "函数调用",
+    ],
+    "AI Skills": [
+        "skills", "skill", "tool", "workflow", "orchestration",
+        "capability", "技能", "工具链", "工作流编排",
+    ],
+    "图片生成": [
+        "image generation", "text-to-image", "image model", "image editing",
+        "diffusion", "stable diffusion", "flux",
+        "图像生成", "文生图", "图片生成", "图像编辑",
+    ],
+    "3D生成": [
+        "3d generation", "3d model", "3d asset", "mesh generation",
+        "gaussian splatting", "scene generation",
+        "3d生成", "3d模型", "三维生成", "场景生成",
+    ],
+    "流程自动化": [
+        "automation", "workflow automation", "process automation",
+        "orchestration", "自动化", "流程自动化", "工作流自动化",
+    ],
 }
 DEFAULT_TOPIC = "通用 AI"
 
@@ -138,25 +201,52 @@ AI_STRONG_EN_KEYWORDS = [
     "large language model",
     "machine learning",
     "neural network",
-    "text-to-video",
-    "video generation",
-    "video model",
+    "agent",
+    "ai agent",
+    "autonomous agent",
+    "multi-agent",
+    "tool use",
+    "tool calling",
+    "function calling",
+    "workflow automation",
+    "process automation",
     "image generation",
-    "stable diffusion",
+    "text-to-image",
+    "image editing",
+    "video generation",
+    "text-to-video",
+    "3d generation",
+    "3d model",
+    "3d asset",
     "diffusion",
+    "stable diffusion",
     "sora",
     "veo",
-    "runway",
+    "flux",
+    "world model",
 ]
+
 AI_STRONG_ZH_KEYWORDS = [
     "生成式ai",
     "生成式人工智能",
     "人工智能",
     "大模型",
     "智能体",
-    "视频生成",
+    "多智能体",
+    "工具调用",
+    "函数调用",
     "图像生成",
+    "图片生成",
+    "文生图",
+    "图像编辑",
+    "视频生成",
     "文生视频",
+    "3d生成",
+    "3d模型",
+    "三维生成",
+    "流程自动化",
+    "工作流自动化",
+    "自动化编排",
     "数字人",
     "虚拟制作",
 ]
@@ -165,7 +255,17 @@ AI_CONTEXT_EN_KEYWORDS = [
     "game", "gaming", "unreal", "unity", "npc",
     "video", "film", "movie", "cinematic", "animation", "vfx", "studio",
 ]
-AI_CONTEXT_ZH_KEYWORDS = ["游戏", "影视", "电影", "短片", "动画", "视频"]
+available_topics = [
+    "游戏",
+    "视频生成",
+    "影视生成",
+    "AI Agent",
+    "AI Skills",
+    "图片生成",
+    "3D生成",
+    "流程自动化",
+    "通用 AI",
+]
 
 MIXED_CONTENT_SOURCES = {"NVIDIA Omniverse Blog"}
 
