@@ -162,6 +162,7 @@ AI_WEAK_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) f
 AI_CONTEXT_EN_PATTERNS = [re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE) for keyword in AI_CONTEXT_EN_KEYWORDS]
 
 CACHE: Dict[str, List[Dict[str, str]]] = {}
+DISPLAY_HISTORY: Dict[str, List[List[str]]] = {}
 
 
 def set_last_error(message: str = "") -> None:
@@ -637,6 +638,138 @@ def select_diverse_articles(ranked: List[Dict[str, str]], target_count: int) -> 
     return selected
 
 
+def get_recent_history_urls(day_key: str, max_rounds: int = 5) -> List[str]:
+    rounds = DISPLAY_HISTORY.get(day_key, [])
+    recent = rounds[-max_rounds:]
+    urls: List[str] = []
+    for one_round in recent:
+        for url in one_round:
+            if url and url not in urls:
+                urls.append(url)
+    return urls
+
+
+def record_display_round(day_key: str, selected_items: List[Dict[str, str]], max_rounds: int = 5) -> None:
+    round_urls = [item.get("url", "") for item in selected_items if item.get("url")]
+    if not round_urls:
+        return
+    history = DISPLAY_HISTORY.setdefault(day_key, [])
+    history.append(round_urls)
+    if len(history) > max_rounds:
+        DISPLAY_HISTORY[day_key] = history[-max_rounds:]
+
+
+def manual_adjusted_score(
+    article: Dict[str, str],
+    mode: str,
+    previous_set: set[str],
+    history_set: set[str],
+) -> float:
+    base = float(score_article(article))
+    url = article.get("url", "")
+
+    if mode == "search":
+        if url and url not in previous_set:
+            base += 4.0
+        if url and url not in history_set:
+            base += 2.0
+    else:
+        if url and url not in previous_set:
+            base += 2.0
+        if url and url not in history_set:
+            base += 1.0
+
+    age_hours = (datetime.now(timezone.utc) - article["published"]).total_seconds() / 3600
+    if age_hours <= 24:
+        base += 2.0 if mode == "search" else 1.0
+    elif age_hours <= 72:
+        base += 1.0 if mode == "search" else 0.5
+
+    return base
+
+
+def select_manual_refresh_articles(
+    ranked: List[Dict[str, str]],
+    target_count: int,
+    mode: str,
+    previous_urls: List[str],
+    recent_history_urls: List[str],
+) -> tuple[List[Dict[str, str]], int, int, int, int]:
+    previous_set = {url for url in previous_urls if url}
+    history_set = {url for url in recent_history_urls if url}
+
+    desired_min_replace = 2
+
+    selected: List[Dict[str, str]] = []
+    source_counts: Dict[str, int] = {}
+    remaining = ranked.copy()
+
+    while remaining and len(selected) < target_count:
+        best_idx = 0
+        best_score = float("-inf")
+        for idx, item in enumerate(remaining):
+            source = item.get("source", "未知来源")
+            already_selected = source_counts.get(source, 0)
+            adjusted = manual_adjusted_score(item, mode, previous_set, history_set)
+            adjusted -= already_selected * DIVERSITY_PENALTY
+            if already_selected == 0:
+                adjusted += 1
+            if adjusted > best_score:
+                best_score = adjusted
+                best_idx = idx
+
+        pick = remaining.pop(best_idx)
+        selected.append(pick)
+        source = pick.get("source", "未知来源")
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    overlap_with_previous = sum(1 for item in selected if item.get("url") in previous_set)
+    replaced_count = max(0, min(target_count, len(previous_set)) - overlap_with_previous)
+
+    if replaced_count < desired_min_replace:
+        selected_urls = {item.get("url") for item in selected}
+        candidate_pool = [
+            item for item in ranked
+            if item.get("url")
+            and item.get("url") not in previous_set
+            and item.get("url") not in selected_urls
+        ]
+        candidate_pool.sort(
+            key=lambda item: manual_adjusted_score(item, mode, previous_set, history_set),
+            reverse=True,
+        )
+
+        replaceable = [
+            (idx, item) for idx, item in enumerate(selected)
+            if item.get("url") in previous_set
+        ]
+        replaceable.sort(key=lambda pair: manual_adjusted_score(pair[1], mode, previous_set, history_set))
+
+        for idx, old_item in replaceable:
+            if replaced_count >= desired_min_replace or not candidate_pool:
+                break
+            old_quality = manual_adjusted_score(old_item, mode, previous_set, history_set)
+            threshold = old_quality - (1.5 if mode == "search" else 1.0)
+            replacement_idx = next(
+                (
+                    i for i, candidate in enumerate(candidate_pool)
+                    if manual_adjusted_score(candidate, mode, previous_set, history_set) >= threshold
+                ),
+                None,
+            )
+            if replacement_idx is None:
+                continue
+
+            replacement = candidate_pool.pop(replacement_idx)
+            selected[idx] = replacement
+            replaced_count += 1
+
+    overlap_with_previous = sum(1 for item in selected if item.get("url") in previous_set)
+    history_hit_count = sum(1 for item in selected if item.get("url") in history_set)
+    new_entered_count = sum(1 for item in selected if item.get("url") and item.get("url") not in previous_set)
+
+    return selected, overlap_with_previous, replaced_count, new_entered_count, history_hit_count
+
 def rotate_equal_score_groups(ranked: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if not ranked:
         return ranked
@@ -654,58 +787,6 @@ def rotate_equal_score_groups(ranked: List[Dict[str, str]]) -> List[Dict[str, st
         idx = end
     return rotated
 
-
-def select_with_novelty(
-    ranked: List[Dict[str, str]],
-    target_count: int,
-    previous_urls: List[str],
-    mode: str,
-) -> tuple[List[Dict[str, str]], int, int]:
-    selected = select_diverse_articles(ranked, target_count)
-    if not selected:
-        return selected, 0, 0
-
-    previous_set = {url for url in previous_urls if url}
-    if not previous_set:
-        return selected, 0, 0
-
-    selected_urls = {item.get("url") for item in selected}
-    candidate_pool = [
-        item for item in ranked
-        if item.get("url") not in previous_set and item.get("url") not in selected_urls
-    ]
-
-    replacement_cap = 2 if mode == "search" else 1
-    replaced_count = 0
-
-    replaceable = [
-        (idx, item) for idx, item in enumerate(selected)
-        if item.get("url") in previous_set
-    ]
-    replaceable.sort(key=lambda pair: score_article(pair[1]))
-
-    for idx, old_item in replaceable:
-        if replaced_count >= replacement_cap or not candidate_pool:
-            break
-
-        old_score = score_article(old_item)
-        min_required = old_score - (1 if mode == "search" else 0)
-        replacement_idx = next(
-            (
-                i for i, candidate in enumerate(candidate_pool)
-                if score_article(candidate) >= min_required
-            ),
-            None,
-        )
-        if replacement_idx is None:
-            continue
-
-        new_item = candidate_pool.pop(replacement_idx)
-        selected[idx] = new_item
-        replaced_count += 1
-
-    overlap_count = sum(1 for item in selected if item.get("url") in previous_set)
-    return selected, overlap_count, replaced_count
 
 def build_daily_digest(force_refresh: bool = False, mode: str = "rss", refresh_reason: str = "auto") -> List[Dict[str, str]]:
     day_key = f"{datetime.now(CN_TZ).strftime('%Y-%m-%d')}:{mode}"
@@ -727,24 +808,38 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss", refresh_r
             for item in previous_items
             if isinstance(item, dict)
         ]
+        recent_history_urls = get_recent_history_urls(day_key, max_rounds=5)
 
         ranked = sorted(candidates, key=score_article, reverse=True)
         if mode == "search" and refresh_reason == "manual":
             ranked = rotate_equal_score_groups(ranked)
 
         target_count = min(MAX_ITEMS, max(MIN_ITEMS, len(ranked)))
-        selected, overlap_count, replaced_count = select_with_novelty(
-            ranked,
-            target_count,
-            previous_urls,
-            mode,
-        )
+        if refresh_reason == "manual":
+            selected, overlap_count, replaced_count, new_entered_count, history_hit_count = select_manual_refresh_articles(
+                ranked,
+                target_count,
+                mode,
+                previous_urls,
+                recent_history_urls,
+            )
+        else:
+            selected = select_diverse_articles(ranked, target_count)
+            previous_set = {url for url in previous_urls if url}
+            history_set = {url for url in recent_history_urls if url}
+            overlap_count = sum(1 for item in selected if item.get("url") in previous_set)
+            replaced_count = max(0, min(target_count, len(previous_set)) - overlap_count)
+            new_entered_count = sum(1 for item in selected if item.get("url") and item.get("url") not in previous_set)
+            history_hit_count = sum(1 for item in selected if item.get("url") in history_set)
+
         logger.info(
-            "候选与轮换统计 mode=%s candidate_count=%d overlap_with_previous=%d replaced_count=%d",
+            "候选与轮换统计 mode=%s candidate_count=%d history_hit_count=%d overlap_with_previous=%d replaced_count=%d newly_entered=%d",
             mode,
             len(candidates),
+            history_hit_count,
             overlap_count,
             replaced_count,
+            new_entered_count,
         )
 
         source_distribution: Dict[str, int] = {}
@@ -794,6 +889,7 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss", refresh_r
 
         with LOCK:
             CACHE[day_key] = result
+            record_display_round(day_key, result, max_rounds=5)
             recent_keys = sorted(CACHE.keys(), reverse=True)[:7]
             for key in list(CACHE.keys()):
                 if key not in recent_keys:
