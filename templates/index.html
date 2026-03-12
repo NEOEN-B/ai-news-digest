@@ -71,11 +71,11 @@
           </form>
 
           <form action="{{ url_for('refresh_news') }}" method="post" id="refreshForm">
-            <input type="hidden" name="source" value="{{ selected_source }}" />
-            <input type="hidden" name="topic" value="{{ selected_topic }}" />
-            <input type="hidden" name="mode" value="{{ selected_mode }}" />
-            <input type="hidden" name="view" value="{{ selected_view }}" />
-            <input type="hidden" name="archive_date" value="{{ selected_archive_date }}" />
+            <input type="hidden" name="source" id="refreshSource" value="{{ selected_source }}" />
+            <input type="hidden" name="topic" id="refreshTopic" value="{{ selected_topic }}" />
+            <input type="hidden" name="mode" id="refreshMode" value="{{ selected_mode }}" />
+            <input type="hidden" name="view" id="refreshView" value="{{ selected_view }}" />
+            <input type="hidden" name="archive_date" id="refreshArchiveDate" value="{{ selected_archive_date }}" />
             <button type="submit" class="refresh-btn" id="refreshBtn">手动刷新资讯</button>
           </form>
         </div>
@@ -177,8 +177,22 @@
     <script>
       const refreshForm = document.getElementById("refreshForm");
       const refreshBtn = document.getElementById("refreshBtn");
+      const refreshSource = document.getElementById("refreshSource");
+      const refreshTopic = document.getElementById("refreshTopic");
+      const refreshMode = document.getElementById("refreshMode");
+      const refreshView = document.getElementById("refreshView");
+      const refreshArchiveDate = document.getElementById("refreshArchiveDate");
+
       if (refreshForm && refreshBtn) {
         refreshForm.addEventListener("submit", () => {
+          const params = new URLSearchParams(window.location.search);
+
+          if (refreshSource) refreshSource.value = params.get("source") || "all";
+          if (refreshTopic) refreshTopic.value = params.get("topic") || "all";
+          if (refreshMode) refreshMode.value = params.get("mode") || "rss";
+          if (refreshView) refreshView.value = params.get("view") || "all";
+          if (refreshArchiveDate) refreshArchiveDate.value = params.get("archive_date") || "";
+
           refreshBtn.disabled = true;
           refreshBtn.textContent = "刷新中...";
         });
