@@ -255,6 +255,22 @@ AI_CONTEXT_EN_KEYWORDS = [
     "game", "gaming", "unreal", "unity", "npc",
     "video", "film", "movie", "cinematic", "animation", "vfx", "studio",
 ]
+AI_CONTEXT_ZH_KEYWORDS = [
+    "游戏",
+    "影视",
+    "电影",
+    "短片",
+    "动画",
+    "视频",
+    "图片",
+    "图像",
+    "3d",
+    "三维",
+    "流程",
+    "自动化",
+    "智能体",
+    "技能",
+]
 available_topics = [
     "游戏",
     "视频生成",
