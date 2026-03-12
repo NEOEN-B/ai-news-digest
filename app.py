@@ -37,7 +37,6 @@ RSS_SOURCES = [
     {"name": "Stability AI Blog", "url": "https://stability.ai/news/rss.xml"},
     {"name": "DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml"},
 ]
-
 SEARCH_MODE_SITES = [
     "openai.com",
     "blog.google",
@@ -78,6 +77,19 @@ SEARCH_MODE_QUERIES = [
     "filmmaking AI",
     "digital human",
     "virtual production",
+    "multimodal model",
+    "diffusion model",
+    "text to video",
+    "AI agent",
+    "AI animation",
+    "AI VFX",
+    "synthetic media",
+    "world model",
+    "3D generation",
+    "AI creator tools",
+    "game development AI",
+    "AI cinema",
+    "AI storytelling",
 ]
 SEARCH_TIMEOUT_SECONDS = 9
 SERPER_ENDPOINT_NEWS = "https://google.serper.dev/news"
@@ -86,7 +98,7 @@ SERPER_ENDPOINT_SEARCH = "https://google.serper.dev/search"
 MAX_ITEMS = 6
 MIN_ITEMS = 5
 RSS_TIMEOUT_SECONDS = 9
-MAX_ENTRIES_PER_SOURCE = 18
+MAX_ENTRIES_PER_SOURCE = 30
 DIVERSITY_PENALTY = 3
 CN_TZ = timezone(timedelta(hours=8))
 DATA_PATH = Path("data/summaries.json")
@@ -432,7 +444,7 @@ def parse_serper_results(payload: Dict[str, object], mode: str) -> List[Dict[str
     return articles
 
 
-def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
+def search_recent_ai_news(limit: int = 80) -> List[Dict[str, str]]:
     serper_key = os.getenv("SERPER_API_KEY", "").strip()
     serper_mode = os.getenv("SERPER_MODE", "news").strip().lower()
     serper_mode = "search" if serper_mode == "search" else "news"
@@ -447,7 +459,7 @@ def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
         search_query = f"({query}) (" + " OR ".join(f"site:{site}" for site in SEARCH_MODE_SITES) + ")"
         request_body = {
             "q": search_query,
-            "num": 10,
+            "num": 20,
             "gl": "us",
             "hl": "en",
             "tbs": "qdr:d3",
@@ -486,7 +498,7 @@ def search_recent_ai_news(limit: int = 50) -> List[Dict[str, str]]:
     return ranked[:limit]
 
 
-def fetch_latest_ai_articles(limit: int = 50) -> List[Dict[str, str]]:
+def fetch_latest_ai_articles(limit: int = 100) -> List[Dict[str, str]]:
     articles: List[Dict[str, str]] = []
     failed_sources: List[str] = []
 
@@ -698,7 +710,7 @@ def select_manual_refresh_articles(
     previous_set = {url for url in previous_urls if url}
     history_set = {url for url in recent_history_urls if url}
 
-    desired_min_replace = 2
+    desired_min_replace = 3 if mode == "search" else 2
 
     selected: List[Dict[str, str]] = []
     source_counts: Dict[str, int] = {}
@@ -800,7 +812,7 @@ def build_daily_digest(force_refresh: bool = False, mode: str = "rss", refresh_r
         if mode == "search":
             candidates = search_recent_ai_news(limit=80)
         else:
-            candidates = fetch_latest_ai_articles(limit=50)
+            candidates = fetch_latest_ai_articles(limit=100)
 
         previous_items = CACHE.get(day_key, [])
         previous_urls = [
