@@ -31,9 +31,54 @@ python app.py
 
 ## 二、生产部署（Gunicorn）
 
+本项目已支持部署到 Render，采用 Flask + Gunicorn 运行。
+
+### 一、部署前准备
+
+确认仓库中包含以下文件：
+
+- `app.py`
+- `requirements.txt`
+- `README.md`
+- `templates/index.html`
+- `static/style.css`
+- `data/summaries.json`
+
+建议 `.gitignore` 包含：
+
+```gitignore
+.env
+.venv/
+__pycache__/
+*.pyc
+data/favorites.json
+
+建议 `requirements.txt` 包含：
+
+```requirements.txt
+flask
+python-dotenv
+feedparser
+apscheduler
+openai
+gunicorn
+
+Render 配置项
+Build Command
+pip install -r requirements.txt
+Start Command
+gunicorn -w 1 -b 0.0.0.0:$PORT --timeout 180 app:app
+
 > 已在 `requirements.txt` 中包含 `gunicorn`。
 
 ### 1) 准备环境
+
+Render 创建方式
+登录 Render
+点击 New
+选择 Web Service
+连接 GitHub 仓库
+选择本项目仓库
 
 ```bash
 python -m venv .venv
@@ -43,6 +88,16 @@ cp .env.example .env
 # 生产建议：FLASK_DEBUG=false，并按需配置 OPENAI_API_KEY
 ```
 
+在 Render 中配置以下环境变量：
+OPENAI_API_KEY=你的模型接口密钥
+OPENAI_BASE_URL=你的兼容接口地址
+OPENAI_MODEL=gpt-4o-mini
+
+SERPER_API_KEY=你的 Serper API 密钥
+SERPER_MODE=news
+
+FLASK_DEBUG=false
+ENABLE_SCHEDULER=false
 ### 2) 启动服务
 
 ```bash
